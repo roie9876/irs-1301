@@ -1,0 +1,819 @@
+{
+  "_meta": {
+    "description": "Form 1301 (טופס 1301) — Israeli Annual Income Tax Return field schema",
+    "source": "IRS Guide 2025 (Guides_IncomeTax_da-2025.pdf)",
+    "year": 2025,
+    "notes": [
+      "Field codes use format: taxpayer/spouse (e.g., 158/172)",
+      "Some fields have 3 codes: taxpayer/spouse/joint (e.g., 305/205/167)",
+      "Right column = registered spouse (בן הזוג הרשום), Left column = other spouse",
+      "This schema focuses on fields relevant to salaried workers (שכירים)"
+    ]
+  },
+  "form_parts": [
+    {
+      "part_id": "א",
+      "part_name_he": "פרטים כלליים",
+      "part_name_en": "General Details",
+      "description": "Marital status, filing type, joint income source, employer reports",
+      "guide_line": 1680,
+      "relevance": "all",
+      "sections": []
+    },
+    {
+      "part_id": "ב",
+      "part_name_he": "פרטים אישיים",
+      "part_name_en": "Personal Details",
+      "description": "ID, address, occupation, family status, bank details",
+      "guide_line": 2857,
+      "relevance": "all",
+      "sections": []
+    },
+    {
+      "part_id": "ג",
+      "part_name_he": "הכנסות מיגיעה אישית",
+      "part_name_en": "Income from Personal Labor",
+      "description": "Sections 1-7: Business income, salary, pensions, shifts, rental of business assets",
+      "guide_line": 2988,
+      "tax_rate": "progressive (10%-50%)",
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 1,
+          "name_he": "הכנסה מעסק או ממשלח יד",
+          "name_en": "Business/Self-Employment Income",
+          "fields": ["150/170", "238/239"],
+          "relevance": "self_employed",
+          "guide_line": 2999,
+          "notes": "Includes war compensation (חרבות ברזל). Not relevant for pure salaried workers."
+        },
+        {
+          "section_num": 2,
+          "name_he": "תקבולים מהמוסד לביטוח לאומי",
+          "name_en": "National Insurance Institute Payments",
+          "fields": ["250/270", "194/196"],
+          "relevance": "salaried",
+          "guide_line": 3072,
+          "notes": "Maternity pay, reserve duty pay, work injury. Field 250/270 for self-employed NII. Field 194/196 for salaried NII not on Form 106."
+        },
+        {
+          "section_num": 3,
+          "name_he": "הכנסה ממשכורת או משכר עבודה",
+          "name_en": "Salary/Wage Income",
+          "fields": ["158/172"],
+          "relevance": "salaried",
+          "guide_line": 3124,
+          "notes": "Main salary field. Includes foreign income, NII payments included in Form 106. Fill from Form 106. Do not double-enter amounts already on 106."
+        },
+        {
+          "section_num": 4,
+          "name_he": "עבודה במשמרות",
+          "name_en": "Shift Work",
+          "fields": ["069/068"],
+          "relevance": "salaried",
+          "guide_line": 3406,
+          "notes": "Income from industrial shift work. Max ₪12,540 for 2025. 15% tax credit on this amount."
+        },
+        {
+          "section_num": 5,
+          "name_he": "קצבאות מהמעביד, מקופת גמל ומביטוח לאומי",
+          "name_en": "Pensions from Employer/Fund/NII",
+          "fields": ["272/258", "061/214/314", "102/101"],
+          "relevance": "salaried",
+          "guide_line": 3423,
+          "subsections": [
+            {
+              "id": "5a",
+              "name_he": "קצבה חייבת",
+              "fields": ["272/258"],
+              "notes": "Taxable pension amount after exemptions"
+            },
+            {
+              "id": "5b",
+              "name_he": "הכנסה לאחר פטירה",
+              "fields": ["258/272"],
+              "notes": "Post-death income. Up to ₪560,280: field 258/272. Excess: field 061/214/314."
+            },
+            {
+              "id": "5c",
+              "name_he": "מענקי פרישה",
+              "fields": ["102/101"],
+              "notes": "Severance/retirement grants. Exempt amount per field 102/101."
+            }
+          ]
+        },
+        {
+          "section_num": 6,
+          "name_he": "הכנסות מהשכרת נכס ששימש לייצור הכנסה מיגיעה אישית",
+          "name_en": "Rental Income from Business-Use Property",
+          "fields": [],
+          "relevance": "self_employed",
+          "guide_line": 3996,
+          "notes": "Rental of property previously used for business. Treated as personal-labor income."
+        },
+        {
+          "section_num": 7,
+          "name_he": "הכנסות אחרות מיגיעה אישית",
+          "name_en": "Other Personal-Labor Income",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 4018,
+          "notes": "Other earned income not covered in sections 1-6."
+        }
+      ]
+    },
+    {
+      "part_id": "ד",
+      "part_name_he": "הכנסות מרכוש בשיעורי מס מיוחדים",
+      "part_name_en": "Property Income at Special Tax Rates",
+      "description": "Sections 10-23: Interest, dividends, rental income at reduced rates",
+      "guide_line": 4054,
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 10,
+          "name_he": "הכנסה כנישום בחברה משפחתית",
+          "name_en": "Family Company Taxpayer Income",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 4215
+        },
+        {
+          "section_num": 11,
+          "name_he": "הכנסות אחרות שאינן מיגיעה אישית",
+          "name_en": "Other Non-Personal-Labor Income",
+          "fields": ["305/205/167"],
+          "relevance": "salaried",
+          "guide_line": 4253,
+          "notes": "Passive income: rental of non-residential property, equipment rental, etc."
+        },
+        {
+          "section_num": 12,
+          "name_he": "הכנסה ממכירת פטנט או ידע",
+          "name_en": "Patent/Know-how Sale Income",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 4337
+        },
+        {
+          "section_num": 13,
+          "name_he": "דיבידנד בשיעור 15%",
+          "name_en": "Dividend at 15%",
+          "fields": ["311/211/060"],
+          "tax_rate": "15%",
+          "relevance": "salaried",
+          "notes": "Dividend from approved/preferred enterprise"
+        },
+        {
+          "section_num": 14,
+          "name_he": "ריבית בשיעור 20%",
+          "name_en": "Interest at 20%",
+          "fields": ["328/228/067"],
+          "tax_rate": "20%",
+          "relevance": "salaried",
+          "notes": "Interest on securities"
+        },
+        {
+          "section_num": 15,
+          "name_he": "ריבית בשיעור 25%",
+          "name_en": "Interest at 25%",
+          "fields": ["157/257/357"],
+          "tax_rate": "25%",
+          "relevance": "salaried",
+          "notes": "Interest on non-indexed or partially-indexed instruments"
+        },
+        {
+          "section_num": 16,
+          "name_he": "דיבידנד בשיעור 20%",
+          "name_en": "Dividend at 20%",
+          "fields": ["325/275/173"],
+          "tax_rate": "20%",
+          "relevance": "salaried",
+          "notes": "Dividend from preferred enterprise or approved building"
+        },
+        {
+          "section_num": 17,
+          "name_he": "דיבידנד בשיעור 25%",
+          "name_en": "Dividend at 25%",
+          "fields": ["341/241/141"],
+          "tax_rate": "25%",
+          "relevance": "salaried",
+          "notes": "Regular dividend from company (non-material shareholder)"
+        },
+        {
+          "section_num": 18,
+          "name_he": "דיבידנד בשיעור 30%",
+          "name_en": "Dividend at 30%",
+          "fields": ["312/212/055"],
+          "tax_rate": "30%",
+          "relevance": "salaried",
+          "notes": "Dividend for material shareholders (בעל מניות מהותי) — >10% holding"
+        },
+        {
+          "section_num": 20,
+          "name_he": "ריבית ריאלית בשיעור 35%",
+          "name_en": "Real Interest at 35%",
+          "fields": ["052/051/050"],
+          "tax_rate": "35%",
+          "relevance": "rare",
+          "notes": "Real interest on indexed government bonds issued before 8/5/2000"
+        },
+        {
+          "section_num": 21,
+          "name_he": "ריבית ורווחים בשיעור 15%",
+          "name_en": "Interest/Profits at 15%",
+          "fields": ["317/217/078"],
+          "tax_rate": "15%",
+          "relevance": "salaried",
+          "notes": "Profits from indexed deposits/savings plans (above CPI increase)"
+        },
+        {
+          "section_num": 23,
+          "name_he": "ריבית ורווחים בשיעור 25%",
+          "name_en": "Interest/Profits at 25%",
+          "fields": ["342/242/142"],
+          "tax_rate": "25%",
+          "relevance": "salaried",
+          "notes": "Profits from non-indexed deposits/savings plans"
+        }
+      ]
+    },
+    {
+      "part_id": "ה",
+      "part_name_he": "הכנסות חייבות בשיעורי מס מיוחדים",
+      "part_name_en": "Income Taxable at Special Rates",
+      "description": "Sections 24-30: Rental income, gambling, foreign rental, other special-rate income",
+      "guide_line": 4299,
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 24,
+          "name_he": "הכנסה משכר דירה למגורים",
+          "name_en": "Residential Rental Income",
+          "fields": ["344/284/222", "345/285/225", "346/286/227"],
+          "relevance": "salaried",
+          "guide_line": 4786,
+          "notes": "Three options: full exemption (up to threshold), 10% flat tax, or regular progressive rates. Field 344/284/222 for 10% track, 345/285/225 for deduction track, 346/286/227 for taxable amount."
+        },
+        {
+          "section_num": 25,
+          "name_he": "הכנסה משכר דירה מחו\"ל",
+          "name_en": "Foreign Rental Income",
+          "fields": ["357/257/157"],
+          "relevance": "salaried",
+          "guide_line": 4831,
+          "notes": "Foreign rental income over ₪188,544 threshold at 25%"
+        },
+        {
+          "section_num": 26,
+          "name_he": "הכנסה מהימורים, הגרלות ופרסים",
+          "name_en": "Gambling/Lottery/Prize Income",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 4850
+        },
+        {
+          "section_num": 29,
+          "name_he": "משיכות שלא כדין מקופת גמל",
+          "name_en": "Unauthorized Pension Fund Withdrawals",
+          "fields": ["338/288"],
+          "tax_rate": "35% or marginal (higher)",
+          "relevance": "rare",
+          "guide_line": null,
+          "notes": "20% tax with no deductions/credits allowed"
+        },
+        {
+          "section_num": 30,
+          "name_he": "הכנסות אחרות בשיעורי מס מיוחדים",
+          "name_en": "Other Income at Special Rates",
+          "fields": ["213/313"],
+          "relevance": "rare",
+          "guide_line": 5015,
+          "notes": "Includes constructive dividends, family company income at 35% fixed rate"
+        }
+      ]
+    },
+    {
+      "part_id": "ו",
+      "part_name_he": "מוסד כספי",
+      "part_name_en": "Financial Institution",
+      "description": "Section 33: Profit of financial institution",
+      "guide_line": 5057,
+      "relevance": "not_relevant",
+      "sections": [
+        {
+          "section_num": 33,
+          "name_he": "רווח של מוסד כספי",
+          "name_en": "Financial Institution Profit",
+          "fields": ["163/032"],
+          "relevance": "not_relevant",
+          "guide_line": 5058
+        }
+      ]
+    },
+    {
+      "part_id": "ז",
+      "part_name_he": "נתונים נוספים",
+      "part_name_en": "Additional Data",
+      "description": "Supplementary data fields",
+      "guide_line": 5181,
+      "relevance": "rare",
+      "sections": []
+    },
+    {
+      "part_id": "ח",
+      "part_name_he": "הכנסות מרווח הון ומשבח",
+      "part_name_en": "Capital Gains and Appreciation",
+      "description": "Capital gains from securities, real estate, etc.",
+      "guide_line": 5209,
+      "relevance": "salaried",
+      "notes": "RSU/ESPP sales, stock trading profits. Filed via Form 1325 (capital gains) and 1399 (real estate). Key for RSU holders.",
+      "sections": []
+    },
+    {
+      "part_id": "ט",
+      "part_name_he": "הכנסות פטורות ממס",
+      "part_name_en": "Tax-Exempt Income",
+      "description": "Sections 41-46: Disability/blindness exemption, rental exemption, pension exemption",
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 41,
+          "name_he": "הכנסה של עיוור ושל נכה 100%",
+          "name_en": "Blind/100% Disabled Person Income",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 5703
+        },
+        {
+          "section_num": 42,
+          "name_he": "הכנסות פטורות משכר דירה למגורים",
+          "name_en": "Exempt Residential Rental Income",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 5794,
+          "notes": "Rental income exempt up to ₪5,654/month threshold for 2025"
+        },
+        {
+          "section_num": 44,
+          "name_he": "קצבאות פטורות ממס",
+          "name_en": "Tax-Exempt Pensions",
+          "fields": ["102/101"],
+          "relevance": "salaried",
+          "guide_line": 5936
+        },
+        {
+          "section_num": 45,
+          "name_he": "הכנסות פטורות ממקורות אחרים",
+          "name_en": "Other Exempt Income",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 5967,
+          "notes": "Includes exempt severance, hostile action compensation, etc."
+        },
+        {
+          "section_num": 46,
+          "name_he": "סך כל הכנסות/רווחים פטורים",
+          "name_en": "Total Exempt Income/Profits",
+          "fields": [],
+          "relevance": "all",
+          "guide_line": 6506
+        }
+      ]
+    },
+    {
+      "part_id": "יא",
+      "part_name_he": "פרטים נוספים ויתרות",
+      "part_name_en": "Additional Details & Balances",
+      "description": "Sections 47-48: Additional details, carry-forward balances",
+      "guide_line": 6511,
+      "relevance": "all",
+      "sections": [
+        {
+          "section_num": 47,
+          "name_he": "פרטים נוספים",
+          "name_en": "Additional Details",
+          "fields": [],
+          "relevance": "all",
+          "guide_line": 6513,
+          "notes": "Includes family company details, foreign income declarations, constructive dividend data"
+        },
+        {
+          "section_num": 48,
+          "name_he": "יתרות להעברה לשנת המס הבאה",
+          "name_en": "Balances Carried Forward",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 6726,
+          "notes": "Losses and donations to carry forward"
+        }
+      ]
+    },
+    {
+      "part_id": "יב",
+      "part_name_he": "ניכויים אישיים",
+      "part_name_en": "Personal Deductions",
+      "description": "Sections 49-60: Insurance, pension fund payments, education, NII",
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 49,
+          "name_he": "ביטוח מפני אובדן כושר עבודה (עצמאי)",
+          "name_en": "Disability Insurance (Self-Employed)",
+          "fields": ["112/113"],
+          "relevance": "self_employed",
+          "guide_line": 6808,
+          "notes": "Self-employed disability insurance deduction. Not for salary deducted at source."
+        },
+        {
+          "section_num": 50,
+          "name_he": "ביטוח מפני אובדן כושר עבודה (שכיר)",
+          "name_en": "Disability Insurance (Salaried)",
+          "fields": ["206/207"],
+          "relevance": "salaried",
+          "guide_line": 6860,
+          "notes": "Employee portion exceeding employer's contribution. Calculate via Form 134 or online wizard."
+        },
+        {
+          "section_num": 53,
+          "name_he": "ניכוי בעד תשלומים לקופת גמל",
+          "name_en": "Pension Fund Payment Deduction",
+          "fields": ["233/234"],
+          "relevance": "salaried",
+          "guide_line": 6961,
+          "notes": "Track א (individual) or Track ב. Choice is made at filing."
+        },
+        {
+          "section_num": 54,
+          "name_he": "דמי ביטוח לאומי ששילם עצמאי",
+          "name_en": "NII Premiums Paid (Self-Employed)",
+          "fields": ["030/089"],
+          "relevance": "self_employed",
+          "guide_line": 7348
+        },
+        {
+          "section_num": 55,
+          "name_he": "ניכוי בעד השתתפות במימון הפחתת דמי ביטוח",
+          "name_en": "NII Premium Reduction Participation",
+          "fields": ["130/189"],
+          "relevance": "self_employed",
+          "guide_line": 7384
+        },
+        {
+          "section_num": 56,
+          "name_he": "ניכוי מההכנסה בגין השקעה בסרט ישראלי",
+          "name_en": "Israeli Film Investment Deduction",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7462
+        },
+        {
+          "section_num": 57,
+          "name_he": "ניכוי מההכנסה בגין השקעה במחקר מדעי",
+          "name_en": "Scientific Research Investment Deduction",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7501
+        },
+        {
+          "section_num": 58,
+          "name_he": "הכנסה מבוטחת",
+          "name_en": "Insured Income",
+          "fields": ["244/245"],
+          "relevance": "salaried",
+          "guide_line": 7520,
+          "notes": "Insured income amount from Form 106, used for pension fund benefit calculation"
+        },
+        {
+          "section_num": 59,
+          "name_he": "הפקדות המעביד לקופות גמל לקצבה",
+          "name_en": "Employer Pension Fund Deposits",
+          "fields": ["248/249"],
+          "relevance": "salaried",
+          "guide_line": 7529,
+          "notes": "Employer contributions to pension fund including severance component, as shown on Form 106"
+        },
+        {
+          "section_num": 60,
+          "name_he": "השתתפות זמנית הפחתת דמי הבראה",
+          "name_en": "Temporary Convalescence Pay Reduction",
+          "fields": ["011/012"],
+          "relevance": "salaried",
+          "guide_line": 7538,
+          "notes": "Convalescence pay deducted from Form 106. Increases income base for pension benefit calculations."
+        }
+      ]
+    },
+    {
+      "part_id": "יג",
+      "part_name_he": "נקודות זיכוי ממס",
+      "part_name_en": "Tax Credit Points",
+      "description": "Sections 61-82: Residency, spouse, children, education, donations, settlements",
+      "guide_line": 7545,
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 61,
+          "name_he": "זיכוי עבור תושב ונסיעה למקום עבודה",
+          "name_en": "Residency & Commute Credit",
+          "fields": [],
+          "relevance": "all",
+          "guide_line": 7555,
+          "notes": "2.25 base credit points (resident + transport). Automatic."
+        },
+        {
+          "section_num": 62,
+          "name_he": "זיכויים בעד בן/בת זוג",
+          "name_en": "Spouse Credits",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 7564,
+          "notes": "Credit for spouse without income or with low income"
+        },
+        {
+          "section_num": 63,
+          "name_he": "זיכוי בעד בן זוג עוזר",
+          "name_en": "Assisting Spouse Credit",
+          "fields": [],
+          "relevance": "self_employed",
+          "guide_line": 7685
+        },
+        {
+          "section_num": 64,
+          "name_he": "נקודות זיכוי בעד ילדים",
+          "name_en": "Child Tax Credits",
+          "fields": ["260/262", "190/291", "361/362"],
+          "relevance": "salaried",
+          "guide_line": 7696,
+          "notes": "Credits by child age group. In married couple: 260/262 for children in custody, 190/291 for children not in custody."
+        },
+        {
+          "section_num": 65,
+          "name_he": "משפחה חד הורית",
+          "name_en": "Single-Parent Family",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7767
+        },
+        {
+          "section_num": 66,
+          "name_he": "נקודות זיכוי בעד השתתפות בבחירות",
+          "name_en": "Election Participation Credit",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7778
+        },
+        {
+          "section_num": 67,
+          "name_he": "זיכוי בגין תשלום דמי מזונות",
+          "name_en": "Alimony Payment Credit",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7784
+        },
+        {
+          "section_num": 68,
+          "name_he": "זיכוי בעד ילד עם מוגבלות",
+          "name_en": "Disabled Child Credit",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 7789
+        },
+        {
+          "section_num": 71,
+          "name_he": "חייל/ת משוחרר/ת",
+          "name_en": "Discharged Soldier",
+          "fields": ["324/224", "124/024"],
+          "relevance": "salaried",
+          "guide_line": 7909,
+          "notes": "Credit for discharged soldiers. Field 324/224 for months, 124/024 for points."
+        },
+        {
+          "section_num": 72,
+          "name_he": "סיום לימודים אקדמיים",
+          "name_en": "Academic Degree Completion",
+          "fields": ["181/182"],
+          "relevance": "salaried",
+          "guide_line": null,
+          "notes": "Code 1=BA, 2=MA, 3=PhD/Medical, 12=BA+MA same year. Enter code and graduation year."
+        },
+        {
+          "section_num": 77,
+          "name_he": "זיכוי בעד החזקת בן משפחה במוסד",
+          "name_en": "Family Member in Institution Credit",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 8287
+        },
+        {
+          "section_num": 78,
+          "name_he": "זיכוי בעד תרומות למוסדות מוכרים",
+          "name_en": "Donations to Recognized Institutions",
+          "fields": ["237/037", "046/048", "292/364"],
+          "relevance": "salaried",
+          "guide_line": 8311,
+          "notes": "35% credit on donations between ₪200 and ₪9,794,880. Field 237/037 for IL donations, 046/048 for US institutions (25% cap), 292/364 for prior-year excess."
+        },
+        {
+          "section_num": 79,
+          "name_he": "זיכוי בעד הוצאות להנצחת זכרון חיילים",
+          "name_en": "Soldier Memorial Expenses Credit",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 8459
+        },
+        {
+          "section_num": 80,
+          "name_he": "סך השקעות בחברת מו\"פ",
+          "name_en": "R&D Company Investment",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 8479
+        },
+        {
+          "section_num": 81,
+          "name_he": "הנחה מהמס לתושבי אילת וים המלח",
+          "name_en": "Eilat/Dead Sea Tax Discount",
+          "fields": [],
+          "relevance": "rare",
+          "guide_line": 8525
+        },
+        {
+          "section_num": 82,
+          "name_he": "הנחה מהמס לתושבי יישובים מזכים",
+          "name_en": "Qualifying Settlement Tax Discount",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 8551,
+          "notes": "Tax discount for residents of qualifying settlements (periphery, border areas)"
+        }
+      ]
+    },
+    {
+      "part_id": "טו",
+      "part_name_he": "מחזור למקדמות, ניכויים והחזרים",
+      "part_name_en": "Turnover, Withholdings & Refunds",
+      "description": "Sections 84-87: Tax withheld at source from salary, interest, dividends, corporate tax credit",
+      "guide_line": 8626,
+      "relevance": "salaried",
+      "sections": [
+        {
+          "section_num": 84,
+          "name_he": "מס שנוכה במקור ממשכורת, מקצבה ומשכר עבודה",
+          "name_en": "Tax Withheld from Salary/Pension",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 8655,
+          "notes": "Tax withheld by employer as shown on Form 106. Main field for salaried refund calculation."
+        },
+        {
+          "section_num": 85,
+          "name_he": "ניכוי במקור מריבית, מהכנסות מרכוש ומפיקדונות",
+          "name_en": "Tax Withheld from Interest/Property/Deposits",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 8664,
+          "notes": "Tax withheld from bank interest, dividends, etc."
+        },
+        {
+          "section_num": 86,
+          "name_he": "זיכוי מס חברות",
+          "name_en": "Corporate Tax Credit",
+          "fields": ["336/276/174"],
+          "relevance": "rare",
+          "guide_line": 8672,
+          "notes": "Credit for constructive dividend corporate tax"
+        },
+        {
+          "section_num": 87,
+          "name_he": "מס שנוכה במקור מהכנסות אחרות",
+          "name_en": "Tax Withheld from Other Income",
+          "fields": [],
+          "relevance": "salaried",
+          "guide_line": 8729,
+          "notes": "Tax withheld from income sources other than salary and interest"
+        }
+      ]
+    }
+  ],
+  "salaried_worker_flow": {
+    "description": "Recommended order for a salaried worker filling Form 1301",
+    "steps": [
+      {
+        "step": 1,
+        "part": "ב",
+        "action": "Fill personal details — ID, address, occupation, bank account",
+        "source": "ID card, bank statement"
+      },
+      {
+        "step": 2,
+        "part": "א",
+        "action": "Mark filing type — joint/separate, spouse details",
+        "source": "Personal knowledge"
+      },
+      {
+        "step": 3,
+        "part": "ג",
+        "section": 3,
+        "action": "Enter salary income from Form 106 field 158/172",
+        "source": "Form 106 from employer(s)"
+      },
+      {
+        "step": 4,
+        "part": "ג",
+        "section": 5,
+        "action": "Enter pension/retirement amounts if applicable",
+        "source": "Form 106, pension fund statements"
+      },
+      {
+        "step": 5,
+        "part": "ד",
+        "action": "Enter interest/dividend income at special rates",
+        "source": "Bank annual statements (טופס 867)"
+      },
+      {
+        "step": 6,
+        "part": "ה",
+        "section": 24,
+        "action": "Enter rental income if renting residential property",
+        "source": "Rental contracts, receipts"
+      },
+      {
+        "step": 7,
+        "part": "ח",
+        "action": "Enter capital gains (RSU sales, stock trades)",
+        "source": "Form 1325, broker statements (E*Trade, etc.)"
+      },
+      {
+        "step": 8,
+        "part": "ט",
+        "action": "Enter exempt income (exempt rental, exempt pension)",
+        "source": "Calculated from earlier sections"
+      },
+      {
+        "step": 9,
+        "part": "יב",
+        "action": "Enter personal deductions — pension contributions, insurance",
+        "source": "Form 106 (sections 50, 53, 58, 59, 60)"
+      },
+      {
+        "step": 10,
+        "part": "יג",
+        "action": "Claim credit points — children, education, donations, settlement",
+        "source": "Personal knowledge, donation receipts, degree certificates"
+      },
+      {
+        "step": 11,
+        "part": "טו",
+        "action": "Enter tax withheld at source (section 84 from Form 106, section 85 from banks)",
+        "source": "Form 106, bank statements"
+      }
+    ]
+  },
+  "key_source_documents": {
+    "form_106": {
+      "name_he": "טופס 106",
+      "name_en": "Annual Employer Tax Certificate",
+      "description": "Primary document for salaried workers. Contains gross salary, tax withheld, pension contributions, convalescence pay, etc.",
+      "key_fields_mapped": {
+        "gross_salary": "→ Form 1301 field 158/172 (section 3)",
+        "tax_withheld": "→ Form 1301 section 84",
+        "pension_employer": "→ Form 1301 field 248/249 (section 59)",
+        "insured_income": "→ Form 1301 field 244/245 (section 58)",
+        "convalescence": "→ Form 1301 field 011/012 (section 60)",
+        "education_fund": "→ Form 1301 field 218/219 (section 52)"
+      }
+    },
+    "form_867": {
+      "name_he": "טופס 867",
+      "name_en": "Annual Bank/Financial Statement",
+      "description": "Interest, dividends, and capital gains from financial institutions",
+      "maps_to": "Form 1301 parts ד, ה, ח"
+    },
+    "form_1325": {
+      "name_he": "טופס 1325",
+      "name_en": "Capital Gains Report",
+      "description": "Detailed report of capital gains from securities (stocks, RSU, ESPP)",
+      "maps_to": "Form 1301 part ח"
+    },
+    "form_126_856": {
+      "name_he": "טופס 126/856",
+      "name_en": "Employer Annual Report",
+      "description": "Filed BY the employer. Deadline: 30.4.2026 for 2025 tax year. If employer hasn't filed, taxpayer may be contacted.",
+      "fields": ["126/856"]
+    }
+  },
+  "dual_field_format": {
+    "description": "Most fields use format XXX/YYY where XXX = taxpayer (נישום/בן זוג רשום) and YYY = spouse (בן/בת זוג)",
+    "examples": {
+      "158/172": "158 = registered spouse salary, 172 = other spouse salary",
+      "206/207": "206 = registered spouse disability insurance, 207 = other spouse",
+      "260/262": "260 = registered spouse children, 262 = other spouse children"
+    },
+    "triple_field_format": "Some fields use XXX/YYY/ZZZ where ZZZ = joint income (הכנסה משותפת)",
+    "triple_examples": {
+      "305/205/167": "305 = taxpayer, 205 = spouse, 167 = joint passive income",
+      "311/211/060": "311 = taxpayer, 211 = spouse, 060 = joint 15% dividend"
+    }
+  }
+}

@@ -3,5 +3,6 @@ uvicorn==0.44.0
 python-dotenv==1.0.1
 litellm==1.83.4
 pydantic==2.12.5
+python-multipart
 pytest==8.3.5
 httpx==0.28.1

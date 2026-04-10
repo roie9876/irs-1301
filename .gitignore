@@ -1,0 +1,43 @@
+# ===== PERSONAL DOCUMENTS - NEVER COMMIT =====
+# All user-uploaded personal tax documents
+data/uploads/
+data/personal/
+data/chroma_db/
+user_documents/
+user_data/
+*.106.pdf
+*.106.jpg
+*.106.png
+
+# ===== Environment & Secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ===== Node/Frontend =====
+node_modules/
+frontend/dist/
+frontend/build/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ===== Docker =====
+*.log
