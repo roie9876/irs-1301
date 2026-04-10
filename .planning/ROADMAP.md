@@ -32,7 +32,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. User selects an LLM provider and model, enters an API key, and gets confirmation that the connection works
   3. LLM settings persist between app restarts without re-entering credentials
   4. Personal documents and API keys are excluded from version control (.gitignore)
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 01-01-PLAN.md — Backend foundation: FastAPI + Settings API + LLM service + tests
+- [ ] 01-02-PLAN.md — Frontend foundation: Vite + React + shadcn/ui + RTL + app shell
+- [ ] 01-03-PLAN.md — Settings page UI + Makefile + integration + human verification
 **UI hint**: yes
 
 ### Phase 2: PDF Extraction — Form 106
