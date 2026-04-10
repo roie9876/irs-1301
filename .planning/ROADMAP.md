@@ -48,7 +48,11 @@ Plans:
   2. User uploads multiple Form 106 files (multiple employers) and sees aggregated totals
   3. User can review each extracted value and manually correct any field
   4. All uploaded documents and extracted data are stored in a local folder only
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 02-01-PLAN.md — Backend: schemas, PDF extraction service, LLM structuring, upload/list/update API, tests
+- [ ] 02-02-PLAN.md — Frontend: upload drop zone, extraction review table, editable fields, aggregation summary
+- [ ] 02-03-PLAN.md — Integration: wire router + routes + nav link, human verification of full flow
 **UI hint**: yes
 
 ### Phase 3: RAG Engine & Guideline Indexing
