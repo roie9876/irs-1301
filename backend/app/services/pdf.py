@@ -1,11 +1,19 @@
 import fitz
 
 
-def extract_text_from_pdf(file_path: str) -> str:
+class EncryptedPdfError(Exception):
+    """Raised when a PDF is encrypted and no/wrong password was provided."""
+    pass
+
+
+def extract_text_from_pdf(file_path: str, password: str = "") -> str:
     """Extract text from a PDF file using PyMuPDF."""
     doc = None
     try:
         doc = fitz.open(file_path)
+        if doc.is_encrypted:
+            if not password or not doc.authenticate(password):
+                raise EncryptedPdfError("הקובץ מוגן בסיסמה")
         pages = []
         for i in range(len(doc)):
             page = doc.load_page(i)

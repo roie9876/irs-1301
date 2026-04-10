@@ -2,7 +2,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.schemas.documents import (
     DocumentInfo,
@@ -14,7 +14,7 @@ from app.schemas.documents import (
     UploadResult,
 )
 from app.services.llm import extract_form106_data
-from app.services.pdf import extract_text_from_pdf
+from app.services.pdf import EncryptedPdfError, extract_text_from_pdf
 
 router = APIRouter(tags=["documents"])
 
@@ -22,9 +22,18 @@ DOCUMENTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "user_dat
 
 
 @router.post("/documents/upload", response_model=UploadResponse)
-async def upload_documents(files: list[UploadFile] = File(...)):
+async def upload_documents(
+    files: list[UploadFile] = File(...),
+    passwords: str = Form("{}"),
+):
     DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
     results: list[UploadResult] = []
+
+    file_passwords: dict[str, str] = {}
+    try:
+        file_passwords = json.loads(passwords)
+    except json.JSONDecodeError:
+        pass
 
     for file in files:
         filename = file.filename or "unknown.pdf"
@@ -45,7 +54,8 @@ async def upload_documents(files: list[UploadFile] = File(...)):
             content = await file.read()
             file_path.write_bytes(content)
 
-            raw_text = extract_text_from_pdf(str(file_path))
+            password = file_passwords.get(filename, "")
+            raw_text = extract_text_from_pdf(str(file_path), password=password)
             if not raw_text.strip():
                 results.append(UploadResult(
                     filename=filename,
@@ -79,6 +89,13 @@ async def upload_documents(files: list[UploadFile] = File(...)):
                 doc_id=doc_id,
                 status="success",
                 extracted=extraction,
+            ))
+        except EncryptedPdfError:
+            results.append(UploadResult(
+                filename=filename,
+                doc_id=doc_id,
+                status="encrypted",
+                error="הקובץ מוגן בסיסמה",
             ))
         except Exception as e:
             results.append(UploadResult(

@@ -35,7 +35,7 @@ export interface DocumentInfo {
 export interface UploadResult {
   filename: string
   doc_id: string
-  status: 'success' | 'error'
+  status: 'success' | 'error' | 'encrypted'
   error?: string
   extracted?: Form106Extraction
 }
@@ -68,10 +68,13 @@ export async function api<T>(
   return response.json()
 }
 
-export async function uploadFiles(files: File[]): Promise<UploadResponse> {
+export async function uploadFiles(files: File[], passwords?: Record<string, string>): Promise<UploadResponse> {
   const formData = new FormData()
   for (const file of files) {
     formData.append('files', file)
+  }
+  if (passwords && Object.keys(passwords).length > 0) {
+    formData.append('passwords', JSON.stringify(passwords))
   }
 
   const response = await fetch('/api/documents/upload', {

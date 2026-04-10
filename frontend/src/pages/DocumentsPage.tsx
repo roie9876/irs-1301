@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileText, Check, AlertCircle, Loader2, Save } from 'lucide-react'
+import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +49,8 @@ function confidenceBadge(confidence: number) {
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [errors, setErrors] = useState<UploadResult[]>([])
+  const [encryptedFiles, setEncryptedFiles] = useState<{ file: File; filename: string }[]>([])
+  const [passwords, setPasswords] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [editedFields, setEditedFields] = useState<Record<string, Record<string, FieldValue>>>({})
@@ -61,16 +63,20 @@ export function DocumentsPage() {
       .catch(() => {})
   }, [])
 
-  const handleFiles = useCallback(async (files: File[]) => {
+  const lastFilesRef = useRef<File[]>([])
+
+  const handleFiles = useCallback(async (files: File[], filePasswords?: Record<string, string>) => {
     const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'))
     if (pdfFiles.length === 0) return
 
+    lastFilesRef.current = pdfFiles
     setUploading(true)
     setErrors([])
     try {
-      const response = await uploadFiles(pdfFiles)
+      const response = await uploadFiles(pdfFiles, filePasswords)
       const successes = response.results.filter((r) => r.status === 'success')
       const failures = response.results.filter((r) => r.status === 'error')
+      const encrypted = response.results.filter((r) => r.status === 'encrypted')
 
       setDocuments((prev) => [
         ...prev,
@@ -82,12 +88,29 @@ export function DocumentsPage() {
         })),
       ])
       setErrors(failures)
+
+      // Track encrypted files for password retry
+      const encFiles = encrypted.map((r) => ({
+        file: pdfFiles.find((f) => f.name === r.filename)!,
+        filename: r.filename,
+      })).filter((e) => e.file)
+      setEncryptedFiles((prev) => {
+        const existing = prev.filter((p) => !encFiles.some((e) => e.filename === p.filename))
+        return [...existing, ...encFiles]
+      })
     } catch {
       setErrors([{ filename: 'upload', doc_id: '', status: 'error', error: 'שגיאה בהעלאה' }])
     } finally {
       setUploading(false)
     }
   }, [])
+
+  const retryWithPasswords = useCallback(async () => {
+    const filesToRetry = encryptedFiles.map((e) => e.file)
+    if (filesToRetry.length === 0) return
+    setEncryptedFiles([])
+    await handleFiles(filesToRetry, passwords)
+  }, [encryptedFiles, passwords, handleFiles])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -209,6 +232,40 @@ export function DocumentsPage() {
           </CardContent>
         </Card>
       ))}
+
+      {/* Encrypted files — password prompt */}
+      {encryptedFiles.length > 0 && (
+        <Card className="border-yellow-500/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-yellow-700">
+              <Lock className="h-5 w-5" />
+              קבצים מוגנים בסיסמה
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {encryptedFiles.map((ef) => (
+              <div key={ef.filename} className="flex items-center gap-3">
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate text-sm">{ef.filename}</span>
+                <Input
+                  type="password"
+                  placeholder="סיסמה"
+                  className="h-8 w-48"
+                  value={passwords[ef.filename] || ''}
+                  onChange={(e) =>
+                    setPasswords((prev) => ({ ...prev, [ef.filename]: e.target.value }))
+                  }
+                  onKeyDown={(e) => { if (e.key === 'Enter') retryWithPasswords() }}
+                />
+              </div>
+            ))}
+            <Button onClick={retryWithPasswords} disabled={uploading}>
+              {uploading ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Lock className="ml-2 h-4 w-4" />}
+              נסה שוב עם סיסמה
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Document cards */}
       {documents.map((doc) => (

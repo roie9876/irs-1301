@@ -31,7 +31,7 @@ class DocumentInfo(BaseModel):
 class UploadResult(BaseModel):
     filename: str
     doc_id: str = ""
-    status: str  # "success" | "error"
+    status: str  # "success" | "error" | "encrypted"
     error: str = ""
     extracted: Form106Extraction | None = None
 
