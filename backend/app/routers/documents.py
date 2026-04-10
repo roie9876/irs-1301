@@ -46,7 +46,23 @@ async def upload_documents(
             ))
             continue
 
-        doc_id = uuid.uuid4().hex[:8]
+        # Check for existing upload with same filename — reuse its doc_id
+        existing_doc_id = None
+        for sidecar_path in DOCUMENTS_DIR.glob("*.106.json"):
+            try:
+                existing = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                if existing.get("original_filename") == filename:
+                    existing_doc_id = existing["doc_id"]
+                    # Remove old files to replace with new upload
+                    sidecar_path.unlink()
+                    for old_file in DOCUMENTS_DIR.glob(f"{existing_doc_id}_*"):
+                        if not old_file.name.endswith(".106.json"):
+                            old_file.unlink()
+                    break
+            except (json.JSONDecodeError, KeyError):
+                continue
+
+        doc_id = existing_doc_id or uuid.uuid4().hex[:8]
         safe_name = f"{doc_id}_{filename}"
         file_path = DOCUMENTS_DIR / safe_name
 
