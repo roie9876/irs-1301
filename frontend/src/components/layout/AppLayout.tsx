@@ -1,4 +1,4 @@
-import { Settings } from 'lucide-react'
+import { Settings, FileText } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 
 interface AppLayoutProps {
@@ -16,6 +16,15 @@ export function AppLayout({ children }: AppLayoutProps) {
             עוזר דוח שנתי 1301
           </Link>
           <nav className="flex items-center gap-2">
+            <Link
+              to="/documents"
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground ${
+                location.pathname === '/documents' ? 'bg-accent text-accent-foreground' : ''
+              }`}
+            >
+              <FileText className="h-4 w-4" />
+              מסמכים
+            </Link>
             <Link
               to="/settings"
               className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground ${

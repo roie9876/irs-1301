@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { AppLayout } from './components/layout/AppLayout'
 import { SettingsPage } from './pages/SettingsPage'
+import { DocumentsPage } from './pages/DocumentsPage'
 import { api } from './lib/api'
 
 interface SettingsStatus {
@@ -43,6 +44,7 @@ export default function App() {
           element={isConfigured ? <HomePage /> : <Navigate to="/settings" replace />}
         />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/documents" element={<DocumentsPage />} />
       </Routes>
     </AppLayout>
   )

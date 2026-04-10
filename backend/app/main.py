@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import settings
+from app.routers import settings, documents
 
 app = FastAPI(title="עוזר דוח שנתי 1301")
 
@@ -13,3 +13,4 @@ app.add_middleware(
 )
 
 app.include_router(settings.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
