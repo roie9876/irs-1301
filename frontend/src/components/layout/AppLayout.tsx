@@ -1,5 +1,8 @@
-import { Settings, FileText } from 'lucide-react'
+import { Settings, FileText, Calendar } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
+import { useTaxYear } from '@/lib/tax-year-context'
+
+const TAX_YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -7,6 +10,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation()
+  const { taxYear, setTaxYear } = useTaxYear()
 
   return (
     <div className="min-h-screen bg-background">
@@ -16,6 +20,20 @@ export function AppLayout({ children }: AppLayoutProps) {
             עוזר דוח שנתי 1301
           </Link>
           <nav className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <select
+                value={taxYear}
+                onChange={(e) => setTaxYear(Number(e.target.value))}
+                className="bg-transparent text-sm font-medium outline-none cursor-pointer"
+              >
+                {TAX_YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    שנת מס {y}
+                  </option>
+                ))}
+              </select>
+            </div>
             <Link
               to="/documents"
               className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground ${

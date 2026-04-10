@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.settings import SettingsRequest, SettingsResponse, TestResult
+from app.schemas.settings import SettingsRequest, SettingsResponse, TestResult, TaxYearRequest
 from app.services.llm import test_connection, load_settings, save_settings
 
 router = APIRouter(tags=["settings"])
@@ -44,5 +44,14 @@ async def save_settings_endpoint(request: SettingsRequest):
         model=request.model,
         api_key=request.api_key,
         api_base=request.api_base,
+        tax_year=request.tax_year,
+    )
+    return SettingsResponse(**load_settings())
+
+
+@router.put("/settings/tax-year", response_model=SettingsResponse)
+async def update_tax_year(request: TaxYearRequest):
+    save_settings(
+        provider="", model="", api_key="", tax_year=request.tax_year
     )
     return SettingsResponse(**load_settings())

@@ -55,16 +55,22 @@ def load_settings() -> dict:
         "model": os.getenv("LLM_MODEL", ""),
         "has_api_key": bool(os.getenv("LLM_API_KEY")),
         "api_base": os.getenv("AZURE_API_BASE", ""),
+        "tax_year": int(os.getenv("TAX_YEAR", "2024")),
     }
 
 
-def save_settings(provider: str, model: str, api_key: str, api_base: str = "") -> None:
+def save_settings(provider: str, model: str, api_key: str, api_base: str = "", tax_year: int = 0) -> None:
     """Save LLM settings to .env file. Per D-10, only called after successful test."""
-    set_key(ENV_PATH, "LLM_PROVIDER", provider)
-    set_key(ENV_PATH, "LLM_MODEL", model)
-    set_key(ENV_PATH, "LLM_API_KEY", api_key)
+    if provider:
+        set_key(ENV_PATH, "LLM_PROVIDER", provider)
+    if model:
+        set_key(ENV_PATH, "LLM_MODEL", model)
+    if api_key:
+        set_key(ENV_PATH, "LLM_API_KEY", api_key)
     if api_base:
         set_key(ENV_PATH, "AZURE_API_BASE", api_base)
+    if tax_year:
+        set_key(ENV_PATH, "TAX_YEAR", str(tax_year))
     load_dotenv(ENV_PATH, override=True)
 
 

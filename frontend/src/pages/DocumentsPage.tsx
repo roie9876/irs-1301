@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock, Trash2 } from 'lucide-react'
+import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock, Trash2, AlertTriangle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useTaxYear } from '@/lib/tax-year-context'
 import {
   api,
   uploadFiles,
@@ -47,6 +48,7 @@ function confidenceBadge(confidence: number) {
 }
 
 export function DocumentsPage() {
+  const { taxYear } = useTaxYear()
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [errors, setErrors] = useState<UploadResult[]>([])
   const [encryptedFiles, setEncryptedFiles] = useState<{ file: File; filename: string }[]>([])
@@ -287,6 +289,12 @@ export function DocumentsPage() {
               <span className="text-sm font-normal text-muted-foreground">({doc.original_filename})</span>
               {doc.user_corrected && (
                 <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">תוקן</span>
+              )}
+              {doc.extracted.tax_year.value != null && doc.extracted.tax_year.value !== taxYear && (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700" title={`מסמך לשנת ${doc.extracted.tax_year.value}, שנה נבחרת ${taxYear}`}>
+                  <AlertTriangle className="h-3 w-3" />
+                  שנת {doc.extracted.tax_year.value}
+                </span>
               )}
             </CardTitle>
             <button

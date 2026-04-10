@@ -12,6 +12,7 @@ def test_get_settings_returns_provider_and_model(client):
     assert data["provider"] == "openai"
     assert data["model"] == "gpt-4o"
     assert data["has_api_key"] is True
+    assert "tax_year" in data
 
 
 def test_get_settings_never_returns_raw_api_key(client):
@@ -121,3 +122,18 @@ def test_save_settings_writes_env(tmp_path):
     assert settings["provider"] == "gemini"
     assert settings["model"] == "gemini-2.0-flash"
     assert settings["has_api_key"] is True
+
+
+def test_put_tax_year(client, mock_env):
+    """PUT /api/settings/tax-year updates year without touching LLM settings."""
+    with patch("app.services.llm.ENV_PATH", mock_env):
+        response = client.put(
+            "/api/settings/tax-year",
+            json={"tax_year": 2023},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tax_year"] == 2023
+    # LLM settings unchanged
+    assert data["provider"] == "openai"
+    assert data["has_api_key"] is True
