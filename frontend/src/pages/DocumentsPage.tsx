@@ -124,7 +124,13 @@ export function DocumentsPage() {
     api<DocumentListResponse>('/documents')
       .then((data) => setDocuments(data.documents))
       .catch(() => {})
-  }, [])
+  }, [taxYear])
+
+  // Filter documents for the selected tax year
+  const filteredDocuments = documents.filter((d) => {
+    const docYear = d.extracted?.tax_year?.value
+    return !docYear || Number(docYear) === taxYear
+  })
 
   const lastFilesRef = useRef<File[]>([])
 
@@ -240,7 +246,7 @@ export function DocumentsPage() {
     }
   }
 
-  const form106Docs = documents.filter((d) => (d.document_type || 'form_106') === 'form_106')
+  const form106Docs = filteredDocuments.filter((d) => (d.document_type || 'form_106') === 'form_106')
   const summableFields = Object.entries(FORM_106_FIELDS)
     .filter(([k, v]) => v.type === 'number' && k !== 'tax_year')
     .map(([k]) => k)
@@ -261,6 +267,9 @@ export function DocumentsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
+      {/* Page heading */}
+      <h1 className="text-xl font-bold">מסמכים — שנת {taxYear}</h1>
+
       {/* Drop Zone */}
       <div
         onDrop={handleDrop}
@@ -346,7 +355,10 @@ export function DocumentsPage() {
       )}
 
       {/* Document cards */}
-      {documents.map((doc) => {
+      {filteredDocuments.length === 0 && !uploading && (
+        <p className="text-center text-muted-foreground py-4">אין מסמכים לשנת {taxYear}. העלה קבצים באמצעות האזור למעלה.</p>
+      )}
+      {filteredDocuments.map((doc) => {
         const docType = doc.document_type || 'form_106'
         const fieldMap = getFieldMap(docType)
         const docYear = doc.extracted?.tax_year?.value

@@ -48,12 +48,13 @@ export function Form1301Page() {
     credit_points_spouse: '',
   })
 
-  // Load documents on mount
+  // Load documents — re-fetch when tax year changes
   useEffect(() => {
     api<DocumentListResponse>('/documents')
       .then((data) => setDocuments(data.documents))
       .catch(() => {})
-  }, [])
+    setResult(null)
+  }, [taxYear])
 
   const handleInputChange = (field: string, value: string) => {
     setInputs((prev) => ({ ...prev, [field]: value }))
