@@ -12,6 +12,7 @@ const PROVIDERS = [
     id: 'openai',
     name: 'OpenAI',
     models: [
+      'gpt-5.4',
       'o4-mini',
       'o3',
       'o3-mini',
@@ -33,6 +34,7 @@ const PROVIDERS = [
     id: 'azure',
     name: 'Azure OpenAI',
     models: [
+      'gpt-5.4',
       'o4-mini',
       'o3',
       'o3-mini',
