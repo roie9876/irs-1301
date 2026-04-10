@@ -1,5 +1,13 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { AppLayout } from './components/layout/AppLayout'
+import { SettingsPage } from './pages/SettingsPage'
+import { api } from './lib/api'
+
+interface SettingsStatus {
+  has_api_key: boolean
+  provider: string
+}
 
 function HomePage() {
   return (
@@ -10,10 +18,31 @@ function HomePage() {
 }
 
 export default function App() {
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [isConfigured, setIsConfigured] = useState(true)
+
+  useEffect(() => {
+    api<SettingsStatus>('/settings')
+      .then((s) => {
+        setIsConfigured(s.has_api_key && !!s.provider)
+        setSettingsLoaded(true)
+      })
+      .catch(() => {
+        setIsConfigured(false)
+        setSettingsLoaded(true)
+      })
+  }, [])
+
+  if (!settingsLoaded) return null
+
   return (
     <AppLayout>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route
+          path="/"
+          element={isConfigured ? <HomePage /> : <Navigate to="/settings" replace />}
+        />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AppLayout>
   )
