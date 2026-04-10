@@ -19,8 +19,8 @@ def extract_text_from_pdf(file_path: str, password: str = "") -> str:
             page = doc.load_page(i)
             pages.append(page.get_text("text"))
         text = "\n--- PAGE BREAK ---\n".join(pages)
-        if len(text) > 15_000:
-            raise ValueError("PDF text too large — likely not a Form 106")
+        if len(text) > 50_000:
+            raise ValueError("PDF text too large")
         return text
     finally:
         if doc:

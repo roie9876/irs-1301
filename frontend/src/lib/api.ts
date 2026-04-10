@@ -1,7 +1,9 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  status: number
+  constructor(status: number, message: string) {
     super(message)
     this.name = 'ApiError'
+    this.status = status
   }
 }
 
@@ -28,7 +30,8 @@ export interface Form106Extraction {
 export interface DocumentInfo {
   doc_id: string
   original_filename: string
-  extracted: Form106Extraction
+  document_type: string
+  extracted: Record<string, FieldValue>
   user_corrected: boolean
 }
 
@@ -37,7 +40,8 @@ export interface UploadResult {
   doc_id: string
   status: 'success' | 'error' | 'encrypted'
   error?: string
-  extracted?: Form106Extraction
+  document_type?: string
+  extracted?: Record<string, FieldValue>
 }
 
 export interface UploadResponse {
@@ -46,6 +50,50 @@ export interface UploadResponse {
 
 export interface DocumentListResponse {
   documents: DocumentInfo[]
+}
+
+// Form 1301 types
+export interface IncomeFields {
+  field_158: number
+  field_172: number
+  field_222: number
+  field_141: number
+  field_327: number
+  field_139: number
+}
+
+export interface TaxCalculation {
+  tax_regular_taxpayer: number
+  tax_regular_spouse: number
+  tax_rental_10pct: number
+  tax_dividend_25pct: number
+  tax_interest_25pct: number
+  tax_capital_gains: number
+  surtax: number
+  gross_tax: number
+  credit_points_amount_taxpayer: number
+  credit_points_amount_spouse: number
+  pension_credit_taxpayer: number
+  pension_credit_spouse: number
+  donation_credit: number
+  life_insurance_credit: number
+  total_credits: number
+  net_tax: number
+  total_withheld: number
+  total_paid: number
+  balance: number
+}
+
+export interface Form1301Result {
+  tax_year: number
+  income: IncomeFields
+  calculation: TaxCalculation
+  source_documents: string[]
+  warnings: string[]
+}
+
+export interface Form1301PreviewResponse {
+  result: Form1301Result
 }
 
 export async function api<T>(

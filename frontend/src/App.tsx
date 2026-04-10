@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { AppLayout } from './components/layout/AppLayout'
 import { SettingsPage } from './pages/SettingsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
+import { Form1301Page } from './pages/Form1301Page'
 import { api } from './lib/api'
 
 interface SettingsStatus {
@@ -45,6 +46,7 @@ export default function App() {
         />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/form1301" element={<Form1301Page />} />
       </Routes>
     </AppLayout>
   )

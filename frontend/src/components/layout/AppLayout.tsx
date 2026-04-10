@@ -1,4 +1,4 @@
-import { Settings, FileText, Calendar } from 'lucide-react'
+import { Settings, FileText, Calendar, Calculator } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { useTaxYear } from '@/lib/tax-year-context'
 
@@ -42,6 +42,15 @@ export function AppLayout({ children }: AppLayoutProps) {
             >
               <FileText className="h-4 w-4" />
               מסמכים
+            </Link>
+            <Link
+              to="/form1301"
+              className={`inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground ${
+                location.pathname === '/form1301' ? 'bg-accent text-accent-foreground' : ''
+              }`}
+            >
+              <Calculator className="h-4 w-4" />
+              חישוב 1301
             </Link>
             <Link
               to="/settings"

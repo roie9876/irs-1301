@@ -10,15 +10,17 @@ import {
   type DocumentInfo,
   type DocumentListResponse,
   type FieldValue,
-  type Form106Extraction,
   type UploadResult,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-const FIELD_LABELS: Record<
-  keyof Form106Extraction,
-  { label_he: string; field_1301: string; type: 'string' | 'number' }
-> = {
+interface FieldMeta {
+  label_he: string
+  field_1301: string
+  type: 'string' | 'number'
+}
+
+const FORM_106_FIELDS: Record<string, FieldMeta> = {
   employer_name: { label_he: 'שם המעסיק', field_1301: '—', type: 'string' },
   employer_id: { label_he: 'מספר מזהה מעסיק', field_1301: '—', type: 'string' },
   tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
@@ -33,13 +35,72 @@ const FIELD_LABELS: Record<
   health_insurance: { label_he: 'ביטוח בריאות', field_1301: '—', type: 'number' },
 }
 
-const NUMERIC_FIELDS = Object.entries(FIELD_LABELS)
-  .filter(([, v]) => v.type === 'number' && v.field_1301 !== '—')
-  .map(([k]) => k as keyof Form106Extraction)
+const FORM_867_FIELDS: Record<string, FieldMeta> = {
+  broker_name: { label_he: 'שם הברוקר', field_1301: '—', type: 'string' },
+  tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
+  dividend_income: { label_he: 'הכנסה מדיבידנד', field_1301: '141', type: 'number' },
+  dividend_foreign: { label_he: 'דיבידנד מחו"ל', field_1301: '—', type: 'number' },
+  dividend_tax_withheld: { label_he: 'מס שנוכה מדיבידנד', field_1301: '—', type: 'number' },
+  foreign_tax_paid: { label_he: 'מס ששולם בחו"ל', field_1301: '—', type: 'number' },
+  interest_income: { label_he: 'הכנסה מריבית', field_1301: '327', type: 'number' },
+  interest_tax_withheld: { label_he: 'מס שנוכה מריבית', field_1301: '—', type: 'number' },
+}
 
-const SUMMABLE_FIELDS = Object.entries(FIELD_LABELS)
-  .filter(([k, v]) => v.type === 'number' && k !== 'tax_year')
-  .map(([k]) => k as keyof Form106Extraction)
+const RENTAL_PAYMENT_FIELDS: Record<string, FieldMeta> = {
+  taxpayer_name: { label_he: 'שם הנישום', field_1301: '—', type: 'string' },
+  tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
+  payment_amount: { label_he: 'סכום תשלום', field_1301: '220', type: 'number' },
+  payment_type: { label_he: 'סוג תשלום', field_1301: '—', type: 'string' },
+  payment_date: { label_he: 'תאריך תשלום', field_1301: '—', type: 'string' },
+}
+
+const ANNUAL_SUMMARY_FIELDS: Record<string, FieldMeta> = {
+  employee_name: { label_he: 'שם העובד', field_1301: '—', type: 'string' },
+  tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
+  total_shares_sold: { label_he: 'מניות שנמכרו', field_1301: '—', type: 'number' },
+  ordinary_income_ils: { label_he: 'הכנסת עבודה (₪)', field_1301: '158', type: 'number' },
+  capital_income_ils: { label_he: 'רווח הון (₪)', field_1301: '139', type: 'number' },
+  tax_advance_payment: { label_he: 'מקדמת מס', field_1301: '—', type: 'number' },
+  tax_plan: { label_he: 'תוכנית מס', field_1301: '—', type: 'string' },
+}
+
+const RECEIPT_FIELDS: Record<string, FieldMeta> = {
+  vendor_name: { label_he: 'שם הספק', field_1301: '—', type: 'string' },
+  date: { label_he: 'תאריך', field_1301: '—', type: 'string' },
+  total_amount: { label_he: 'סכום כולל', field_1301: '—', type: 'number' },
+  description: { label_he: 'תיאור', field_1301: '—', type: 'string' },
+}
+
+const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
+  form_106: FORM_106_FIELDS,
+  form_867: FORM_867_FIELDS,
+  rental_payment: RENTAL_PAYMENT_FIELDS,
+  annual_summary: ANNUAL_SUMMARY_FIELDS,
+  receipt: RECEIPT_FIELDS,
+}
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  form_106: 'טופס 106',
+  form_867: 'טופס 867',
+  rental_payment: 'אישור תשלום שכירות',
+  annual_summary: 'דוח שנתי מניות',
+  receipt: 'קבלה',
+}
+
+function getFieldMap(docType: string): Record<string, FieldMeta> {
+  return FIELD_MAPS[docType] || FORM_106_FIELDS
+}
+
+function getDocTitle(doc: DocumentInfo): string {
+  const typeLabel = DOC_TYPE_LABELS[doc.document_type] || doc.document_type
+  const name = doc.extracted?.employer_name?.value
+    || doc.extracted?.broker_name?.value
+    || doc.extracted?.vendor_name?.value
+    || doc.extracted?.employee_name?.value
+    || doc.extracted?.taxpayer_name?.value
+    || ''
+  return name ? `${typeLabel} — ${name}` : typeLabel
+}
 
 function confidenceBadge(confidence: number) {
   if (confidence >= 0.8) return <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">{Math.round(confidence * 100)}%</span>
@@ -85,6 +146,7 @@ export function DocumentsPage() {
         ...successes.map((r) => ({
           doc_id: r.doc_id,
           original_filename: r.filename,
+          document_type: r.document_type || 'form_106',
           extracted: r.extracted!,
           user_corrected: false,
         })),
@@ -124,15 +186,14 @@ export function DocumentsPage() {
     [handleFiles],
   )
 
-  const getFieldValue = (doc: DocumentInfo, field: keyof Form106Extraction): FieldValue => {
+  const getFieldValue = (doc: DocumentInfo, field: string): FieldValue => {
     const edited = editedFields[doc.doc_id]?.[field]
     if (edited) return edited
-    return doc.extracted[field]
+    return doc.extracted[field] || { value: null, confidence: 0 }
   }
 
-  const setFieldEdit = (docId: string, field: string, value: string) => {
-    const meta = FIELD_LABELS[field as keyof Form106Extraction]
-    const parsed: number | string | null = meta.type === 'number' ? (value === '' ? null : Number(value)) : value
+  const setFieldEdit = (docId: string, field: string, value: string, fieldMeta: FieldMeta) => {
+    const parsed: number | string | null = fieldMeta.type === 'number' ? (value === '' ? null : Number(value)) : value
     setEditedFields((prev) => ({
       ...prev,
       [docId]: {
@@ -179,10 +240,15 @@ export function DocumentsPage() {
     }
   }
 
-  const aggregation = documents.length >= 2
-    ? SUMMABLE_FIELDS.reduce(
+  const form106Docs = documents.filter((d) => (d.document_type || 'form_106') === 'form_106')
+  const summableFields = Object.entries(FORM_106_FIELDS)
+    .filter(([k, v]) => v.type === 'number' && k !== 'tax_year')
+    .map(([k]) => k)
+
+  const aggregation = form106Docs.length >= 2
+    ? summableFields.reduce(
         (acc, field) => {
-          const sum = documents.reduce((s, doc) => {
+          const sum = form106Docs.reduce((s, doc) => {
             const val = getFieldValue(doc, field).value
             return s + (typeof val === 'number' ? val : 0)
           }, 0)
@@ -214,7 +280,7 @@ export function DocumentsPage() {
         )}
         <div>
           <p className="text-lg font-medium">גרור קבצי PDF לכאן או לחץ לבחירה</p>
-          <p className="text-sm text-muted-foreground">טופס 106 בלבד • ניתן להעלות מספר קבצים</p>
+          <p className="text-sm text-muted-foreground">טופס 106, 867, אישור תשלום שכירות, קבלת רו"ח • ניתן להעלות מספר קבצים</p>
         </div>
         <input
           ref={fileInputRef}
@@ -280,20 +346,24 @@ export function DocumentsPage() {
       )}
 
       {/* Document cards */}
-      {documents.map((doc) => (
+      {documents.map((doc) => {
+        const docType = doc.document_type || 'form_106'
+        const fieldMap = getFieldMap(docType)
+        const docYear = doc.extracted?.tax_year?.value
+        return (
         <Card key={doc.doc_id}>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              <span>{doc.extracted.employer_name.value || doc.original_filename}</span>
+              <span>{getDocTitle(doc)}</span>
               <span className="text-sm font-normal text-muted-foreground">({doc.original_filename})</span>
               {doc.user_corrected && (
                 <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">תוקן</span>
               )}
-              {doc.extracted.tax_year.value != null && doc.extracted.tax_year.value !== taxYear && (
-                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700" title={`מסמך לשנת ${doc.extracted.tax_year.value}, שנה נבחרת ${taxYear}`}>
+              {docYear != null && Number(docYear) !== taxYear && (
+                <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-700" title={`מסמך לשנת ${docYear}, שנה נבחרת ${taxYear}`}>
                   <AlertTriangle className="h-3 w-3" />
-                  שנת {doc.extracted.tax_year.value}
+                  שנת {docYear}
                 </span>
               )}
             </CardTitle>
@@ -317,8 +387,7 @@ export function DocumentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(Object.keys(FIELD_LABELS) as (keyof Form106Extraction)[]).map((field) => {
-                    const meta = FIELD_LABELS[field]
+                  {Object.entries(fieldMap).map(([field, meta]) => {
                     const fv = getFieldValue(doc, field)
                     return (
                       <tr key={field} className="border-b last:border-0">
@@ -328,7 +397,7 @@ export function DocumentsPage() {
                           <Input
                             type={meta.type === 'number' ? 'number' : 'text'}
                             value={fv.value ?? ''}
-                            onChange={(e) => setFieldEdit(doc.doc_id, field, e.target.value)}
+                            onChange={(e) => setFieldEdit(doc.doc_id, field, e.target.value, meta)}
                             className="h-8 w-40"
                           />
                         </td>
@@ -359,7 +428,8 @@ export function DocumentsPage() {
             </div>
           </CardContent>
         </Card>
-      ))}
+        )
+      })}
 
       {/* Aggregation summary */}
       {aggregation && (
@@ -376,14 +446,14 @@ export function DocumentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {SUMMABLE_FIELDS.map((field) => {
-                  const meta = FIELD_LABELS[field]
+                {summableFields.map((field) => {
+                  const meta = FORM_106_FIELDS[field]
                   const val = aggregation[field]
                   return (
                     <tr key={field} className="border-b last:border-0">
                       <td className="py-2 font-medium">{meta.label_he}</td>
                       <td className="py-2">
-                        {meta.type === 'number' && field !== 'work_days'
+                        {field !== 'work_days'
                           ? `₪${val.toLocaleString('he-IL')}`
                           : val.toLocaleString('he-IL')}
                       </td>

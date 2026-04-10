@@ -21,10 +21,69 @@ class Form106Extraction(BaseModel):
     health_insurance: FieldValue = FieldValue()
 
 
+class Form867Extraction(BaseModel):
+    broker_name: FieldValue = FieldValue()
+    broker_id: FieldValue = FieldValue()
+    account_name: FieldValue = FieldValue()
+    tax_year: FieldValue = FieldValue()
+    dividend_income: FieldValue = FieldValue()
+    dividend_foreign: FieldValue = FieldValue()
+    dividend_tax_rate: FieldValue = FieldValue()
+    dividend_tax_withheld: FieldValue = FieldValue()
+    foreign_tax_paid: FieldValue = FieldValue()
+    interest_income: FieldValue = FieldValue()
+    interest_tax_withheld: FieldValue = FieldValue()
+
+
+class RentalPaymentExtraction(BaseModel):
+    taxpayer_name: FieldValue = FieldValue()
+    taxpayer_id: FieldValue = FieldValue()
+    tax_year: FieldValue = FieldValue()
+    payment_amount: FieldValue = FieldValue()
+    payment_type: FieldValue = FieldValue()
+    payment_date: FieldValue = FieldValue()
+    reference_number: FieldValue = FieldValue()
+
+
+class AnnualSummaryExtraction(BaseModel):
+    employee_name: FieldValue = FieldValue()
+    employee_id: FieldValue = FieldValue()
+    tax_year: FieldValue = FieldValue()
+    total_shares_sold: FieldValue = FieldValue()
+    ordinary_income_ils: FieldValue = FieldValue()
+    capital_income_ils: FieldValue = FieldValue()
+    tax_advance_payment: FieldValue = FieldValue()
+    gross_proceed_usd: FieldValue = FieldValue()
+    tax_plan: FieldValue = FieldValue()
+
+
+class ReceiptExtraction(BaseModel):
+    vendor_name: FieldValue = FieldValue()
+    receipt_number: FieldValue = FieldValue()
+    date: FieldValue = FieldValue()
+    amount_before_vat: FieldValue = FieldValue()
+    vat_amount: FieldValue = FieldValue()
+    total_amount: FieldValue = FieldValue()
+    description: FieldValue = FieldValue()
+    payer_name: FieldValue = FieldValue()
+    payer_id: FieldValue = FieldValue()
+
+
+# Map of document type to extraction model
+EXTRACTION_MODELS = {
+    "form_106": Form106Extraction,
+    "form_867": Form867Extraction,
+    "rental_payment": RentalPaymentExtraction,
+    "annual_summary": AnnualSummaryExtraction,
+    "receipt": ReceiptExtraction,
+}
+
+
 class DocumentInfo(BaseModel):
     doc_id: str
     original_filename: str
-    extracted: Form106Extraction
+    document_type: str = "form_106"
+    extracted: dict  # type-specific extraction data
     user_corrected: bool = False
 
 
@@ -33,7 +92,8 @@ class UploadResult(BaseModel):
     doc_id: str = ""
     status: str  # "success" | "error" | "encrypted"
     error: str = ""
-    extracted: Form106Extraction | None = None
+    document_type: str = ""
+    extracted: dict | None = None
 
 
 class UploadResponse(BaseModel):

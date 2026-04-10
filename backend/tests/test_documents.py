@@ -4,9 +4,22 @@ import json
 from unittest.mock import AsyncMock, patch
 
 
+CLASSIFY_106 = {"document_type": "form_106", "confidence": 0.95, "description": "טופס 106"}
+
+
+def _upload_mocks(sample_extraction):
+    """Context manager stack for common upload mocks."""
+    mock_extractor = AsyncMock(return_value=sample_extraction)
+    return (
+        patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"),
+        patch("app.routers.documents.classify_document", new_callable=AsyncMock, return_value=CLASSIFY_106),
+        patch.dict("app.routers.documents.EXTRACTORS", {"form_106": mock_extractor}),
+    )
+
+
 def test_upload_single_pdf_success(documents_client, sample_pdf_bytes, sample_extraction):
-    with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, return_value=sample_extraction):
+    m1, m2, m3 = _upload_mocks(sample_extraction)
+    with m1, m2, m3:
         response = documents_client.post(
             "/api/documents/upload",
             files=[("files", ("form106.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf"))],
@@ -32,8 +45,8 @@ def test_upload_non_pdf_returns_error(documents_client):
 
 
 def test_upload_multiple_files(documents_client, sample_pdf_bytes, sample_extraction):
-    with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, return_value=sample_extraction):
+    m1, m2, m3 = _upload_mocks(sample_extraction)
+    with m1, m2, m3:
         response = documents_client.post(
             "/api/documents/upload",
             files=[
@@ -48,24 +61,25 @@ def test_upload_multiple_files(documents_client, sample_pdf_bytes, sample_extrac
 
 
 def test_upload_creates_json_sidecar(documents_client, sample_pdf_bytes, sample_extraction, mock_documents_dir):
-    with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, return_value=sample_extraction):
+    m1, m2, m3 = _upload_mocks(sample_extraction)
+    with m1, m2, m3:
         documents_client.post(
             "/api/documents/upload",
             files=[("files", ("form106.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf"))],
         )
 
-    sidecars = list(mock_documents_dir.glob("*.106.json"))
+    sidecars = list(mock_documents_dir.glob("*.doc.json"))
     assert len(sidecars) == 1
     data = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert data["original_filename"] == "form106.pdf"
+    assert data["document_type"] == "form_106"
     assert data["user_corrected"] is False
     assert "gross_salary" in data["extracted"]
 
 
 def test_get_documents_returns_saved(documents_client, sample_pdf_bytes, sample_extraction):
-    with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, return_value=sample_extraction):
+    m1, m2, m3 = _upload_mocks(sample_extraction)
+    with m1, m2, m3:
         documents_client.post(
             "/api/documents/upload",
             files=[("files", ("form106.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf"))],
@@ -79,8 +93,8 @@ def test_get_documents_returns_saved(documents_client, sample_pdf_bytes, sample_
 
 
 def test_put_document_updates_field(documents_client, sample_pdf_bytes, sample_extraction):
-    with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, return_value=sample_extraction):
+    m1, m2, m3 = _upload_mocks(sample_extraction)
+    with m1, m2, m3:
         upload_resp = documents_client.post(
             "/api/documents/upload",
             files=[("files", ("form106.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf"))],
@@ -107,7 +121,8 @@ def test_put_document_not_found(documents_client):
 
 def test_upload_extraction_error_handled(documents_client, sample_pdf_bytes):
     with patch("app.routers.documents.extract_text_from_pdf", return_value="שם מעסיק: חברה"), \
-         patch("app.routers.documents.extract_form106_data", new_callable=AsyncMock, side_effect=Exception("LLM fail")):
+         patch("app.routers.documents.classify_document", new_callable=AsyncMock, return_value=CLASSIFY_106), \
+         patch.dict("app.routers.documents.EXTRACTORS", {"form_106": AsyncMock(side_effect=Exception("LLM fail"))}):
         response = documents_client.post(
             "/api/documents/upload",
             files=[("files", ("form106.pdf", io.BytesIO(sample_pdf_bytes), "application/pdf"))],
