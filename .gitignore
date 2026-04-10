@@ -1,5 +1,6 @@
 # ===== PERSONAL DOCUMENTS - NEVER COMMIT =====
 # All user-uploaded personal tax documents
+roie_private/
 data/uploads/
 data/personal/
 data/chroma_db/
