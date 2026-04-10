@@ -94,19 +94,49 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LLM-01..05 | Phase 1 | Pending |
-| INF-01..04 | Phase 1 | Pending |
-| DOC-01..10 | Phase 2 | Pending |
-| RAG-01..04 | Phase 3 | Pending |
-| WIZ-01..07 | Phase 4 | Pending |
-| CHAT-01..03 | Phase 5 | Pending |
-| DOC-03, DOC-04..08 | Phase 6 | Pending |
-| WIZ-06, INC-01..03 | Phase 7 | Pending |
-| SPO-01..03 | Phase 8 | Pending |
+| LLM-01 | Phase 1 | Pending |
+| LLM-02 | Phase 1 | Pending |
+| LLM-03 | Phase 1 | Pending |
+| LLM-04 | Phase 1 | Pending |
+| LLM-05 | Phase 1 | Pending |
+| INF-01 | Phase 1 | Pending |
+| INF-02 | Phase 1 | Pending |
+| INF-03 | Phase 1 | Pending |
+| INF-04 | Phase 1 | Pending |
+| DOC-01 | Phase 2 | Pending |
+| DOC-02 | Phase 2 | Pending |
+| DOC-09 | Phase 2 | Pending |
+| DOC-10 | Phase 2 | Pending |
+| RAG-01 | Phase 3 | Pending |
+| RAG-02 | Phase 3 | Pending |
+| RAG-03 | Phase 3 | Pending |
+| RAG-04 | Phase 3 | Pending |
+| WIZ-01 | Phase 4 | Pending |
+| WIZ-02 | Phase 4 | Pending |
+| WIZ-03 | Phase 4 | Pending |
+| WIZ-04 | Phase 4 | Pending |
+| WIZ-05 | Phase 4 | Pending |
+| WIZ-07 | Phase 4 | Pending |
+| CHAT-01 | Phase 5 | Pending |
+| CHAT-02 | Phase 5 | Pending |
+| CHAT-03 | Phase 5 | Pending |
+| DOC-03 | Phase 6 | Pending |
+| DOC-04 | Phase 6 | Pending |
+| DOC-05 | Phase 6 | Pending |
+| DOC-06 | Phase 6 | Pending |
+| DOC-07 | Phase 6 | Pending |
+| DOC-08 | Phase 6 | Pending |
+| WIZ-06 | Phase 7 | Pending |
+| INC-01 | Phase 7 | Pending |
+| INC-02 | Phase 7 | Pending |
+| INC-03 | Phase 7 | Pending |
+| SPO-01 | Phase 8 | Pending |
+| SPO-02 | Phase 8 | Pending |
+| SPO-03 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 38 total
-- Mapped to phases: 38
+- v1 requirements: 39 total
+- Mapped to phases: 39
 - Unmapped: 0
 
 ---
