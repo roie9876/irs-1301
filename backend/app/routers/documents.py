@@ -187,3 +187,30 @@ async def update_document(doc_id: str, body: UpdateFieldsRequest):
         }),
         user_corrected=True,
     )
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    if not DOCUMENTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="מסמך לא נמצא")
+
+    found = False
+    for path in DOCUMENTS_DIR.glob("*.106.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("doc_id") == doc_id:
+                path.unlink()
+                found = True
+                break
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    if not found:
+        raise HTTPException(status_code=404, detail="מסמך לא נמצא")
+
+    # Remove the PDF file too
+    for pdf_path in DOCUMENTS_DIR.glob(f"{doc_id}_*"):
+        if not pdf_path.name.endswith(".106.json"):
+            pdf_path.unlink()
+
+    return {"ok": True}

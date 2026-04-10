@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock } from 'lucide-react'
+import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -167,6 +167,16 @@ export function DocumentsPage() {
     }
   }
 
+  const deleteDocument = async (docId: string) => {
+    if (!confirm('למחוק את המסמך?')) return
+    try {
+      await api(`/documents/${docId}`, { method: 'DELETE' })
+      setDocuments((prev) => prev.filter((d) => d.doc_id !== docId))
+    } catch {
+      // ignore
+    }
+  }
+
   const aggregation = documents.length >= 2
     ? SUMMABLE_FIELDS.reduce(
         (acc, field) => {
@@ -270,7 +280,7 @@ export function DocumentsPage() {
       {/* Document cards */}
       {documents.map((doc) => (
         <Card key={doc.doc_id}>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
               <span>{doc.extracted.employer_name.value || doc.original_filename}</span>
@@ -279,6 +289,13 @@ export function DocumentsPage() {
                 <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">תוקן</span>
               )}
             </CardTitle>
+            <button
+              onClick={() => deleteDocument(doc.doc_id)}
+              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              title="מחק מסמך"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
