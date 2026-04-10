@@ -12,7 +12,7 @@ Transform Israeli salaried workers' tax filing from a ₪1,000–5,000 CPA expen
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Project Scaffolding & LLM Configuration** - Working Streamlit app with Hebrew RTL, LLM provider selection, API key management
+- [ ] **Phase 1: Project Scaffolding & LLM Configuration** - React+Vite frontend with Hebrew RTL + FastAPI backend with LLM provider selection, API key management
 - [ ] **Phase 2: PDF Extraction — Form 106** - Upload Form 106 PDFs, extract structured data, review and correct
 - [ ] **Phase 3: RAG Engine & Guideline Indexing** - Index IRS guidance documents per tax year, retrieve field-level explanations
 - [ ] **Phase 4: Form Wizard — Step-by-Step 1301** - Guided form filling with AI explanations, suggested values, and save/resume
@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Depends on**: Nothing (first phase)
 **Requirements**: LLM-01, LLM-02, LLM-03, LLM-04, LLM-05, INF-01, INF-02, INF-03, INF-04
 **Success Criteria** (what must be TRUE):
-  1. User launches the app with `streamlit run` and sees a Hebrew RTL interface
+  1. User launches the app (React frontend + FastAPI backend) and sees a professional Hebrew RTL interface
   2. User selects an LLM provider and model, enters an API key, and gets confirmation that the connection works
   3. LLM settings persist between app restarts without re-entering credentials
   4. Personal documents and API keys are excluded from version control (.gitignore)

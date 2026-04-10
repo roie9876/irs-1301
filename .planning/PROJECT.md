@@ -64,7 +64,7 @@
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Streamlit לממשק | מהיר לפיתוח, תומך עברית/RTL, לא צריך frontend נפרד | — Pending |
+| React + Vite + FastAPI | ממשק מקצועי, RTL native, שליטה מלאה בעיצוב (shadcn/ui), הפרדת frontend/backend | ✓ Good |
 | RAG נפרד לכל שנה | ההנחיות משתנות בין שנים — אסור לערבב | — Pending |
 | Multi-provider LLM | כל משתמש עם הספק שלו — OpenAI/Azure/Gemini/Claude | — Pending |
 | חילוץ טקסט לא OCR | טופס 106 הוא PDF דיגיטלי, אפשר PyMuPDF/pdfplumber | — Pending |
