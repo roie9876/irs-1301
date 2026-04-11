@@ -13,12 +13,14 @@ class Form106Extraction(BaseModel):
     gross_salary: FieldValue = FieldValue()
     tax_withheld: FieldValue = FieldValue()
     pension_employer: FieldValue = FieldValue()
+    pension_employee: FieldValue = FieldValue()
     insured_income: FieldValue = FieldValue()
     convalescence_pay: FieldValue = FieldValue()
     education_fund: FieldValue = FieldValue()
     work_days: FieldValue = FieldValue()
     national_insurance: FieldValue = FieldValue()
     health_insurance: FieldValue = FieldValue()
+    donations: FieldValue = FieldValue()
 
 
 class Form867Extraction(BaseModel):
@@ -69,6 +71,14 @@ class ReceiptExtraction(BaseModel):
     payer_id: FieldValue = FieldValue()
 
 
+class RentalExcelExtraction(BaseModel):
+    tax_year: FieldValue = FieldValue()
+    properties: FieldValue = FieldValue()  # comma-separated property names
+    total_annual_income: FieldValue = FieldValue()
+    tax_rate_pct: FieldValue = FieldValue()
+    tax_amount: FieldValue = FieldValue()
+
+
 # Map of document type to extraction model
 EXTRACTION_MODELS = {
     "form_106": Form106Extraction,
@@ -76,6 +86,7 @@ EXTRACTION_MODELS = {
     "rental_payment": RentalPaymentExtraction,
     "annual_summary": AnnualSummaryExtraction,
     "receipt": ReceiptExtraction,
+    "rental_excel": RentalExcelExtraction,
 }
 
 

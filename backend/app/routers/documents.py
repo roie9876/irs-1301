@@ -23,6 +23,7 @@ from app.services.llm import (
     extract_receipt_data,
 )
 from app.services.pdf import EncryptedPdfError, extract_text_from_pdf
+from app.services.excel import extract_rental_excel
 
 router = APIRouter(tags=["documents"])
 
@@ -82,11 +83,14 @@ async def upload_documents(
     for file in files:
         filename = file.filename or "unknown.pdf"
 
-        if not filename.lower().endswith(".pdf"):
+        is_pdf = filename.lower().endswith(".pdf")
+        is_xlsx = filename.lower().endswith(".xlsx")
+
+        if not is_pdf and not is_xlsx:
             results.append(UploadResult(
                 filename=filename,
                 status="error",
-                error="הקובץ אינו PDF תקין",
+                error="הקובץ אינו PDF או Excel תקין",
             ))
             continue
 
@@ -112,6 +116,40 @@ async def upload_documents(
         try:
             content = await file.read()
             file_path.write_bytes(content)
+
+            if is_xlsx:
+                # Excel files: direct programmatic extraction, no LLM needed
+                doc_type = "rental_excel"
+                extracted_data = extract_rental_excel(str(file_path))
+
+                model_cls = EXTRACTION_MODELS[doc_type]
+                extraction_obj = model_cls(**{
+                    k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+                    for k, v in extracted_data.items()
+                    if k in model_cls.model_fields
+                })
+
+                sidecar_path = DOCUMENTS_DIR / f"{safe_name}{SIDECAR_SUFFIX}"
+                sidecar = {
+                    "doc_id": doc_id,
+                    "original_filename": filename,
+                    "document_type": doc_type,
+                    "extracted": extraction_obj.model_dump(),
+                    "user_corrected": False,
+                }
+                sidecar_path.write_text(
+                    json.dumps(sidecar, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+
+                results.append(UploadResult(
+                    filename=filename,
+                    doc_id=doc_id,
+                    status="success",
+                    document_type=doc_type,
+                    extracted=extraction_obj.model_dump(),
+                ))
+                continue
 
             password = file_passwords.get(filename, "")
             raw_text = extract_text_from_pdf(str(file_path), password=password)

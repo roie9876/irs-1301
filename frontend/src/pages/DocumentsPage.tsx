@@ -27,12 +27,14 @@ const FORM_106_FIELDS: Record<string, FieldMeta> = {
   gross_salary: { label_he: 'הכנסה ברוטו', field_1301: '158/172', type: 'number' },
   tax_withheld: { label_he: 'מס שנוכה במקור', field_1301: 'סעיף 84', type: 'number' },
   pension_employer: { label_he: 'הפרשות מעסיק לפנסיה', field_1301: '248/249', type: 'number' },
+  pension_employee: { label_he: 'ניכוי קופ"ג כעמית שכיר', field_1301: '086/045', type: 'number' },
   insured_income: { label_he: 'הכנסה מבוטחת', field_1301: '244/245', type: 'number' },
   convalescence_pay: { label_he: 'דמי הבראה', field_1301: '011/012', type: 'number' },
   education_fund: { label_he: 'קרן השתלמות', field_1301: '218/219', type: 'number' },
   work_days: { label_he: 'ימי עבודה', field_1301: '—', type: 'number' },
   national_insurance: { label_he: 'ביטוח לאומי', field_1301: '—', type: 'number' },
   health_insurance: { label_he: 'ביטוח בריאות', field_1301: '—', type: 'number' },
+  donations: { label_he: 'תרומות', field_1301: '237/037', type: 'number' },
 }
 
 const FORM_867_FIELDS: Record<string, FieldMeta> = {
@@ -71,12 +73,21 @@ const RECEIPT_FIELDS: Record<string, FieldMeta> = {
   description: { label_he: 'תיאור', field_1301: '—', type: 'string' },
 }
 
+const RENTAL_EXCEL_FIELDS: Record<string, FieldMeta> = {
+  tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
+  properties: { label_he: 'נכסים', field_1301: '—', type: 'string' },
+  total_annual_income: { label_he: 'סה״כ הכנסה שנתית', field_1301: '222', type: 'number' },
+  tax_rate_pct: { label_he: 'שיעור מס (%)', field_1301: '—', type: 'number' },
+  tax_amount: { label_he: 'סכום מס', field_1301: '220', type: 'number' },
+}
+
 const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
   form_106: FORM_106_FIELDS,
   form_867: FORM_867_FIELDS,
   rental_payment: RENTAL_PAYMENT_FIELDS,
   annual_summary: ANNUAL_SUMMARY_FIELDS,
   receipt: RECEIPT_FIELDS,
+  rental_excel: RENTAL_EXCEL_FIELDS,
 }
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -85,6 +96,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   rental_payment: 'אישור תשלום שכירות',
   annual_summary: 'דוח שנתי מניות',
   receipt: 'קבלה',
+  rental_excel: 'חישוב שכירות (Excel)',
 }
 
 function getFieldMap(docType: string): Record<string, FieldMeta> {
@@ -98,6 +110,7 @@ function getDocTitle(doc: DocumentInfo): string {
     || doc.extracted?.vendor_name?.value
     || doc.extracted?.employee_name?.value
     || doc.extracted?.taxpayer_name?.value
+    || doc.extracted?.properties?.value
     || ''
   return name ? `${typeLabel} — ${name}` : typeLabel
 }
@@ -135,14 +148,17 @@ export function DocumentsPage() {
   const lastFilesRef = useRef<File[]>([])
 
   const handleFiles = useCallback(async (files: File[], filePasswords?: Record<string, string>) => {
-    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'))
-    if (pdfFiles.length === 0) return
+    const supportedFiles = files.filter((f) => {
+      const name = f.name.toLowerCase()
+      return name.endsWith('.pdf') || name.endsWith('.xlsx')
+    })
+    if (supportedFiles.length === 0) return
 
-    lastFilesRef.current = pdfFiles
+    lastFilesRef.current = supportedFiles
     setUploading(true)
     setErrors([])
     try {
-      const response = await uploadFiles(pdfFiles, filePasswords)
+      const response = await uploadFiles(supportedFiles, filePasswords)
       const successes = response.results.filter((r) => r.status === 'success')
       const failures = response.results.filter((r) => r.status === 'error')
       const encrypted = response.results.filter((r) => r.status === 'encrypted')
@@ -288,13 +304,13 @@ export function DocumentsPage() {
           <Upload className="h-10 w-10 text-muted-foreground" />
         )}
         <div>
-          <p className="text-lg font-medium">גרור קבצי PDF לכאן או לחץ לבחירה</p>
-          <p className="text-sm text-muted-foreground">טופס 106, 867, אישור תשלום שכירות, קבלת רו"ח • ניתן להעלות מספר קבצים</p>
+          <p className="text-lg font-medium">גרור קבצי PDF או Excel לכאן או לחץ לבחירה</p>
+          <p className="text-sm text-muted-foreground">טופס 106, 867, אישור תשלום שכירות, קבלת רו"ח, חישוב שכירות (xlsx) • ניתן להעלות מספר קבצים</p>
         </div>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf"
+          accept=".pdf,.xlsx"
           multiple
           className="hidden"
           onChange={(e) => {
