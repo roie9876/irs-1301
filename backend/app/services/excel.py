@@ -123,8 +123,10 @@ def _extract_year(ws, file_path: str) -> int | None:
             if m:
                 return int(m.group(1))
 
-    # Fallback: extract year from filename
-    m = re.search(r'(\d{4})', file_path)
+    # Fallback: extract year from filename (basename only to avoid dir names)
+    import os
+    basename = os.path.basename(file_path)
+    m = re.search(r'(\d{4})', basename)
     if m:
         return int(m.group(1))
 
