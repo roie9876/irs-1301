@@ -33,14 +33,14 @@ def test_compute_form1301_with_manual_inputs():
     """Compute with only manual inputs (rental, dividends)."""
     result = compute_form1301(
         year=2024,
-        rental_income=100_000,
+        rental_10_taxpayer=100_000,
         rental_tax_paid=10_000,
-        dividend_income=40_000,
+        dividend_25_taxpayer=40_000,
     )
     # 10% of 100,000 = 15,220
     assert result.calculation.tax_rental_10pct == 10_000
     # 25% of 40,000 = 18,374.5 → 18,375
-    assert abs(result.calculation.tax_dividend_25pct - 10_000) <= 1
+    assert abs(result.calculation.tax_25pct - 10_000) <= 1
     # Withholdings should include rental tax paid
     assert result.withholdings.field_220 == 10_000
 
@@ -74,8 +74,8 @@ def test_compute_form1301_donation_credit():
     """Donation credit at 35%."""
     result = compute_form1301(
         year=2024,
-        donation_amount_taxpayer=5_000,
-        donation_amount_spouse=3_000,
+        donation_taxpayer=5_000,
+        donation_spouse=3_000,
     )
     # (5000 + 3000) * 0.35 = 2,800
     assert result.calculation.donation_credit == 2_800

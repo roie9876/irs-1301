@@ -106,6 +106,9 @@ class ExemptIncomeFields(BaseModel):
 
 class DeductionFields(BaseModel):
     """חלק יב — ניכויים אישיים (סעיפים 49-60)."""
+    # הוצאות הפקת הכנסה (דמי רו"ח)
+    production_expenses_taxpayer: float = 0
+    production_expenses_spouse: float = 0
     # סעיף 49: ביטוח אבדן כושר עבודה — עצמאי
     field_112: float = 0  # אבדן כושר עצמאי — רשום
     field_113: float = 0  # אבדן כושר עצמאי — בן/בת זוג
@@ -240,6 +243,8 @@ class TaxCalculation(BaseModel):
     total_withheld: float = 0
     total_paid: float = 0
     balance: float = 0
+    interest_cpi_adjustment: float = 0
+    balance_after_interest: float = 0
 
 
 class Form1301Result(BaseModel):

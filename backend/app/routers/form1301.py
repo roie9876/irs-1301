@@ -105,6 +105,11 @@ async def preview_form1301(
     rental_tax_paid: float = Query(0),
     withholding_other: float = Query(0),
     land_appreciation_tax: float = Query(0),
+    # הוצאות הפקת הכנסה (דמי רו"ח)
+    production_expenses_taxpayer: float = Query(0),
+    production_expenses_spouse: float = Query(0),
+    # הפרשי הצמדה וריבית
+    interest_cpi_adjustment: float = Query(0),
 ):
     result = compute_form1301(
         year=year,
@@ -195,6 +200,9 @@ async def preview_form1301(
         rental_tax_paid=rental_tax_paid,
         withholding_other=withholding_other,
         land_appreciation_tax=land_appreciation_tax,
+        production_expenses_taxpayer=production_expenses_taxpayer,
+        production_expenses_spouse=production_expenses_spouse,
+        interest_cpi_adjustment=interest_cpi_adjustment,
     )
 
     return Form1301PreviewResponse(result=result)

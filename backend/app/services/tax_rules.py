@@ -87,7 +87,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_pension_deduction_pct=0.07,
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
-        pension_credit_income_ceiling=140_556,
+        pension_credit_income_ceiling=146_200,
         nii_max_insured_income=47_465,
     ),
     2024: TaxYearRules(
@@ -207,4 +207,4 @@ def compute_surtax(
         capital_above = max(0, min(capital_income, total_taxable_income - rules.surtax_threshold))
         surtax += capital_above * rules.surtax_capital_rate
 
-    return round(surtax)
+    return int(surtax)

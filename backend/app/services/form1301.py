@@ -243,17 +243,30 @@ def compute_children_credit_points(
 ) -> float:
     """Compute credit points for children based on birth years.
 
-    Israeli tax law (section 40):
-    - Each parent: 1 credit point per child under 18 at end of tax year
-    - Woman: additional 1 credit point per child under 18
+    Israeli tax law (section 40/60) — married couple table:
+      Birth year:  1.5 each parent
+      Ages 1-5:    2.5 each parent
+      Ages 6-12:   woman 2, man 1
+      Ages 13-17:  woman 1, man 0   (until 2023)
+                   woman 2, man 1   (from 2024 — law amendment)
+      Age 18:      woman 0.5, man 0
     """
     points = 0.0
     for birth_year in children_birth_years:
         age = tax_year - birth_year
-        if 0 <= age <= 17:
-            points += 1.0
-            if is_woman:
-                points += 1.0
+        if age == 0:
+            points += 1.5
+        elif 1 <= age <= 5:
+            points += 2.5
+        elif 6 <= age <= 12:
+            points += 2.0 if is_woman else 1.0
+        elif 13 <= age <= 17:
+            if tax_year >= 2024:
+                points += 2.0 if is_woman else 1.0
+            else:
+                points += 1.0 if is_woman else 0.0
+        elif age == 18:
+            points += 0.5 if is_woman else 0.0
     return points
 
 
@@ -387,6 +400,11 @@ def compute_form1301(
     rental_tax_paid: float = 0,
     withholding_other: float = 0,
     land_appreciation_tax: float = 0,
+    # הוצאות הפקת הכנסה (דמי רו"ח)
+    production_expenses_taxpayer: float = 0,
+    production_expenses_spouse: float = 0,
+    # הפרשי הצמדה וריבית
+    interest_cpi_adjustment: float = 0,
 ) -> Form1301Result:
     """Compute the full Form 1301 from uploaded documents and manual inputs."""
     rules = get_rules(year)
@@ -402,10 +420,6 @@ def compute_form1301(
 
     # Auto-populate from Form 867
     form867 = aggregate_form867(all_docs)
-    if dividend_25_taxpayer == 0 and form867["dividend_income"] > 0:
-        dividend_25_taxpayer = form867["dividend_income"]
-    if interest_deposits_25_taxpayer == 0 and form867["interest_income"] > 0:
-        interest_deposits_25_taxpayer = form867["interest_income"]
 
     # Annual Sales Report (ESOP) — capital income goes to dividends
     annual_summary = aggregate_annual_summary(all_docs)
@@ -447,6 +461,13 @@ def compute_form1301(
     if sp["capital_gains_102"] > 0:
         dividend_25_spouse += sp["capital_gains_102"]
 
+    # Only use 867 dividends/interest if capital_gains_102 didn't supply any
+    # (867 reports bank dividends taxed at final rate — CPA typically excludes them)
+    if dividend_25_taxpayer == 0 and form867["dividend_income"] > 0:
+        dividend_25_taxpayer = form867["dividend_income"]
+    if interest_deposits_25_taxpayer == 0 and form867["interest_income"] > 0:
+        interest_deposits_25_taxpayer = form867["interest_income"]
+
     # Auto-populate children credit points from ID supplement (ספח)
     id_supp = aggregate_id_supplement(all_docs)
     if id_supp["children_birth_years"] and children_credit_points_taxpayer == 0 and children_credit_points_spouse == 0:
@@ -470,6 +491,10 @@ def compute_form1301(
 
     taxpayer_salary = tp["gross_salary"]
     spouse_salary = sp["gross_salary"]
+
+    # Deduct production expenses (CPA fee) from salary
+    taxpayer_salary -= production_expenses_taxpayer
+    spouse_salary -= production_expenses_spouse
 
     # === Build all field structures ===
 
@@ -540,6 +565,8 @@ def compute_form1301(
     )
 
     deductions = DeductionFields(
+        production_expenses_taxpayer=production_expenses_taxpayer,
+        production_expenses_spouse=production_expenses_spouse,
         field_112=disability_insurance_self_taxpayer,
         field_113=disability_insurance_self_spouse,
         field_206=disability_insurance_employee_taxpayer,
@@ -751,11 +778,11 @@ def compute_form1301(
     total_paid = (
         tp["tax_withheld"] + sp["tax_withheld"]
         + rental_tax_paid
-        + dividend_interest_withheld
         + withholding_other
         + land_appreciation_tax
     )
     balance = net_tax - total_paid
+    balance_after_interest = balance + interest_cpi_adjustment
 
     calculation = TaxCalculation(
         tax_regular_taxpayer=tax_regular_tp,
@@ -786,6 +813,8 @@ def compute_form1301(
         total_withheld=tp["tax_withheld"] + sp["tax_withheld"],
         total_paid=total_paid,
         balance=balance,
+        interest_cpi_adjustment=interest_cpi_adjustment,
+        balance_after_interest=balance_after_interest,
     )
 
     return Form1301Result(

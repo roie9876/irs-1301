@@ -627,6 +627,11 @@ export function Form1301Page() {
     rental_tax_paid: '',
     withholding_other: '',
     land_appreciation_tax: '',
+    // הוצאות הפקת הכנסה
+    production_expenses_taxpayer: '',
+    production_expenses_spouse: '',
+    // הפרשי הצמדה וריבית
+    interest_cpi_adjustment: '',
   })
 
   // Load documents
@@ -683,7 +688,10 @@ export function Form1301Page() {
   }, {})
 
   const r = result?.result
-  const balance = r?.calculation.balance ?? 0
+  const interestAdj = r?.calculation.interest_cpi_adjustment ?? 0
+  const balance = interestAdj !== 0
+    ? (r?.calculation.balance_after_interest ?? 0)
+    : (r?.calculation.balance ?? 0)
 
   // Group sections by part
   const partGroups: { partId: string; title: string; sections: FormSectionDef[] }[] = [
@@ -865,6 +873,14 @@ export function Form1301Page() {
               <InputField label="מס שכירות ששולם (220)" id="rental_tax_paid" value={inputs.rental_tax_paid} onChange={handleInputChange} placeholder="אוטומטי מאישור" />
               <InputField label="ניכוי מהכנסות אחרות (040)" id="withholding_other" value={inputs.withholding_other} onChange={handleInputChange} />
               <InputField label="מס שבח (041)" id="land_appreciation_tax" value={inputs.land_appreciation_tax} onChange={handleInputChange} />
+            </div>
+
+            {/* הוצאות הפקת הכנסה */}
+            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">הוצאות הפקת הכנסה</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <InputField label={'דמי רו"ח — נישום'} id="production_expenses_taxpayer" value={inputs.production_expenses_taxpayer} onChange={handleInputChange} placeholder="למשל 1,170" />
+              <InputField label={'דמי רו"ח — בן/בת זוג'} id="production_expenses_spouse" value={inputs.production_expenses_spouse} onChange={handleInputChange} />
+              <InputField label="הפרשי הצמדה וריבית" id="interest_cpi_adjustment" value={inputs.interest_cpi_adjustment} onChange={handleInputChange} placeholder="מתוך השומה" />
             </div>
           </div>
         </CardContent>
