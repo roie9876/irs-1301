@@ -33,12 +33,13 @@ export interface DocumentInfo {
   document_type: string
   extracted: Record<string, FieldValue>
   user_corrected: boolean
+  extraction_warnings?: string[]
 }
 
 export interface UploadResult {
   filename: string
   doc_id: string
-  status: 'success' | 'error' | 'encrypted'
+  status: 'success' | 'error' | 'encrypted' | 'skipped'
   error?: string
   document_type?: string
   extracted?: Record<string, FieldValue>
@@ -224,6 +225,8 @@ export interface TaxCalculation {
   total_withheld: number
   total_paid: number
   balance: number
+  interest_cpi_adjustment: number
+  balance_after_interest: number
 }
 
 export interface Form1301Result {
@@ -240,10 +243,34 @@ export interface Form1301Result {
   calculation: TaxCalculation
   source_documents: string[]
   warnings: string[]
+  effective_inputs: Record<string, number>
 }
 
 export interface Form1301PreviewResponse {
   result: Form1301Result
+}
+
+export interface FieldHelpResponse {
+  code: string
+  title: string
+  description: string
+  part_id: string
+  part_name_he: string
+  section_num: number | null
+  section_name_he: string
+  guide_line: number | null
+  tax_rate: string
+  notes: string[]
+}
+
+export interface AdvisorItemPayload {
+  title: string
+  detail: string
+  level: string
+}
+
+export interface AdvisorAnswerResponse {
+  answer: string
 }
 
 export async function api<T>(

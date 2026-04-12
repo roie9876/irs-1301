@@ -1,11 +1,14 @@
 # ===== PERSONAL DOCUMENTS - NEVER COMMIT =====
 # All user-uploaded personal tax documents
-roie_private/
+*_private/
+private_documents/
 data/uploads/
 data/personal/
 data/chroma_db/
 user_documents/
 user_data/
+.planning/
+backend/documents/
 *.106.pdf
 *.106.jpg
 *.106.png
@@ -17,6 +20,7 @@ user_data/
 
 # ===== Python =====
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.so

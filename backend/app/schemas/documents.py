@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
 
 
@@ -93,9 +95,15 @@ class IdSupplementExtraction(BaseModel):
     """Extracted data from Israeli ID supplement (ספח תעודת זהות)."""
     holder_name: FieldValue = FieldValue()
     holder_id: FieldValue = FieldValue()
+    holder_birth_date: FieldValue = FieldValue()
     spouse_name: FieldValue = FieldValue()
     spouse_id: FieldValue = FieldValue()
+    spouse_birth_date: FieldValue = FieldValue()
     holder_gender: FieldValue = FieldValue()  # "male" or "female"
+    address_street: FieldValue = FieldValue()
+    address_house_number: FieldValue = FieldValue()
+    address_city: FieldValue = FieldValue()
+    address_zip: FieldValue = FieldValue()
     children: list[ChildInfo] = []
 
 
@@ -117,12 +125,13 @@ class DocumentInfo(BaseModel):
     document_type: str = "form_106"
     extracted: dict  # type-specific extraction data
     user_corrected: bool = False
+    extraction_warnings: list[str] = []
 
 
 class UploadResult(BaseModel):
     filename: str
     doc_id: str = ""
-    status: str  # "success" | "error" | "encrypted"
+    status: str  # "success" | "error" | "encrypted" | "skipped"
     error: str = ""
     document_type: str = ""
     extracted: dict | None = None

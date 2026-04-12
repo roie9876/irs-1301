@@ -41,7 +41,7 @@ def test_upload_non_pdf_returns_error(documents_client):
     assert response.status_code == 200
     data = response.json()
     assert data["results"][0]["status"] == "error"
-    assert "הקובץ אינו PDF או Excel תקין" in data["results"][0]["error"]
+    assert "הקובץ אינו PDF, Excel או תמונה תקינה" in data["results"][0]["error"]
 
 
 def test_upload_multiple_files(documents_client, sample_pdf_bytes, sample_extraction):

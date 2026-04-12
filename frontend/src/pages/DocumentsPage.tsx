@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock, Trash2, AlertTriangle } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Upload, FileText, Check, AlertCircle, Loader2, Save, Lock, Trash2, AlertTriangle, Eye, RefreshCcw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Dialog, DialogHeader, DialogTitle, DialogContent } from '@/components/ui/dialog'
 import { useTaxYear } from '@/lib/tax-year-context'
+import { FloatingChat, type FormSnapshot } from '@/components/FloatingChat'
 import {
   api,
   uploadFiles,
@@ -81,6 +83,20 @@ const RENTAL_EXCEL_FIELDS: Record<string, FieldMeta> = {
   tax_amount: { label_he: 'סכום מס', field_1301: '220', type: 'number' },
 }
 
+const ID_SUPPLEMENT_FIELDS: Record<string, FieldMeta> = {
+  holder_name: { label_he: 'שם בעל התעודה', field_1301: '—', type: 'string' },
+  holder_id: { label_he: 'ת.ז. בעל התעודה', field_1301: '—', type: 'string' },
+  holder_birth_date: { label_he: 'תאריך לידה בעל התעודה', field_1301: '—', type: 'string' },
+  holder_gender: { label_he: 'מין', field_1301: '—', type: 'string' },
+  spouse_name: { label_he: 'שם בן/בת זוג', field_1301: '—', type: 'string' },
+  spouse_id: { label_he: 'ת.ז. בן/בת זוג', field_1301: '—', type: 'string' },
+  spouse_birth_date: { label_he: 'תאריך לידה בן/בת זוג', field_1301: '—', type: 'string' },
+  address_street: { label_he: 'רחוב', field_1301: '—', type: 'string' },
+  address_house_number: { label_he: 'מספר בית', field_1301: '—', type: 'string' },
+  address_city: { label_he: 'יישוב', field_1301: '—', type: 'string' },
+  address_zip: { label_he: 'מיקוד', field_1301: '—', type: 'string' },
+}
+
 const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
   form_106: FORM_106_FIELDS,
   form_867: FORM_867_FIELDS,
@@ -88,6 +104,7 @@ const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
   annual_summary: ANNUAL_SUMMARY_FIELDS,
   receipt: RECEIPT_FIELDS,
   rental_excel: RENTAL_EXCEL_FIELDS,
+  id_supplement: ID_SUPPLEMENT_FIELDS,
 }
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -97,6 +114,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   annual_summary: 'דוח שנתי מניות',
   receipt: 'קבלה',
   rental_excel: 'חישוב שכירות (Excel)',
+  id_supplement: 'ספח תעודת זהות',
 }
 
 function getFieldMap(docType: string): Record<string, FieldMeta> {
@@ -110,6 +128,7 @@ function getDocTitle(doc: DocumentInfo): string {
     || doc.extracted?.vendor_name?.value
     || doc.extracted?.employee_name?.value
     || doc.extracted?.taxpayer_name?.value
+    || doc.extracted?.holder_name?.value
     || doc.extracted?.properties?.value
     || ''
   return name ? `${typeLabel} — ${name}` : typeLabel
@@ -119,6 +138,15 @@ function confidenceBadge(confidence: number) {
   if (confidence >= 0.8) return <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">{Math.round(confidence * 100)}%</span>
   if (confidence >= 0.5) return <span className="rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">{Math.round(confidence * 100)}%</span>
   return <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">{confidence > 0 ? `${Math.round(confidence * 100)}%` : '—'}</span>
+}
+
+function normalizeDisplayValue(field: string, value: FieldValue['value']) {
+  if (field === 'holder_gender') {
+    const normalized = String(value ?? '').trim().toLowerCase()
+    if (normalized === 'male' || normalized === 'זכר') return 'זכר'
+    if (normalized === 'female' || normalized === 'נקבה') return 'נקבה'
+  }
+  return value
 }
 
 export function DocumentsPage() {
@@ -131,7 +159,21 @@ export function DocumentsPage() {
   const [dragOver, setDragOver] = useState(false)
   const [editedFields, setEditedFields] = useState<Record<string, Record<string, FieldValue>>>({})
   const [saveStatus, setSaveStatus] = useState<Record<string, 'saving' | 'saved' | 'error'>>({})
+  const [reextractStatus, setReextractStatus] = useState<Record<string, 'running' | 'done' | 'error'>>({})
+  const [viewerDoc, setViewerDoc] = useState<DocumentInfo | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const chatSnapshot = useMemo<FormSnapshot>(() => ({
+    taxYear,
+    activeTab: 'documents',
+    personalForm: {},
+    generalForm: {},
+    inputs: {},
+    sourceDocuments: documents.map((d) => d.original_filename),
+    warnings: [],
+    balance: 0,
+    netTax: 0,
+  }), [taxYear, documents])
 
   useEffect(() => {
     api<DocumentListResponse>('/documents')
@@ -161,6 +203,7 @@ export function DocumentsPage() {
       const response = await uploadFiles(supportedFiles, filePasswords)
       const successes = response.results.filter((r) => r.status === 'success')
       const failures = response.results.filter((r) => r.status === 'error')
+      const skipped = response.results.filter((r) => r.status === 'skipped')
       const encrypted = response.results.filter((r) => r.status === 'encrypted')
 
       setDocuments((prev) => [
@@ -173,11 +216,11 @@ export function DocumentsPage() {
           user_corrected: false,
         })),
       ])
-      setErrors(failures)
+      setErrors([...failures, ...skipped])
 
       // Track encrypted files for password retry
       const encFiles = encrypted.map((r) => ({
-        file: pdfFiles.find((f) => f.name === r.filename)!,
+        file: supportedFiles.find((f) => f.name === r.filename)!,
         filename: r.filename,
       })).filter((e) => e.file)
       setEncryptedFiles((prev) => {
@@ -210,8 +253,11 @@ export function DocumentsPage() {
 
   const getFieldValue = (doc: DocumentInfo, field: string): FieldValue => {
     const edited = editedFields[doc.doc_id]?.[field]
-    if (edited) return edited
-    return doc.extracted[field] || { value: null, confidence: 0 }
+    if (edited) {
+      return { ...edited, value: normalizeDisplayValue(field, edited.value) }
+    }
+    const extracted = doc.extracted[field] || { value: null, confidence: 0 }
+    return { ...extracted, value: normalizeDisplayValue(field, extracted.value) }
   }
 
   const setFieldEdit = (docId: string, field: string, value: string, fieldMeta: FieldMeta) => {
@@ -259,6 +305,23 @@ export function DocumentsPage() {
       setDocuments((prev) => prev.filter((d) => d.doc_id !== docId))
     } catch {
       // ignore
+    }
+  }
+
+  const reextractDocument = async (docId: string) => {
+    setReextractStatus((prev) => ({ ...prev, [docId]: 'running' }))
+    try {
+      const refreshed = await api<DocumentInfo>(`/documents/${docId}/reextract`, { method: 'POST' })
+      setDocuments((prev) => prev.map((doc) => (doc.doc_id === docId ? refreshed : doc)))
+      setViewerDoc((prev) => (prev?.doc_id === docId ? refreshed : prev))
+      setReextractStatus((prev) => ({ ...prev, [docId]: 'done' }))
+      setTimeout(() => setReextractStatus((prev) => {
+        const copy = { ...prev }
+        delete copy[docId]
+        return copy
+      }), 2000)
+    } catch {
+      setReextractStatus((prev) => ({ ...prev, [docId]: 'error' }))
     }
   }
 
@@ -321,17 +384,17 @@ export function DocumentsPage() {
         />
       </div>
 
-      {/* Error cards */}
+      {/* Error / skipped cards */}
       {errors.map((err, i) => (
-        <Card key={i} className="border-destructive/50">
+        <Card key={i} className={err.status === 'skipped' ? 'border-muted' : 'border-destructive/50'}>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-destructive">
+            <CardTitle className={`flex items-center gap-2 ${err.status === 'skipped' ? 'text-muted-foreground' : 'text-destructive'}`}>
               <AlertCircle className="h-4 w-4" />
               {err.filename}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-destructive">{err.error}</p>
+            <p className={`text-sm ${err.status === 'skipped' ? 'text-muted-foreground' : 'text-destructive'}`}>{err.error}</p>
           </CardContent>
         </Card>
       ))}
@@ -395,13 +458,29 @@ export function DocumentsPage() {
                 </span>
               )}
             </CardTitle>
-            <button
-              onClick={() => deleteDocument(doc.doc_id)}
-              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              title="מחק מסמך"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setViewerDoc(doc)}
+                className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                title="הצג מסמך וחילוץ"
+              >
+                <Eye className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => reextractDocument(doc.doc_id)}
+                className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                title="חלץ מחדש"
+              >
+                {reextractStatus[doc.doc_id] === 'running' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              </button>
+              <button
+                onClick={() => deleteDocument(doc.doc_id)}
+                className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                title="מחק מסמך"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -436,6 +515,38 @@ export function DocumentsPage() {
                 </tbody>
               </table>
             </div>
+            {docType === 'id_supplement' && Array.isArray(doc.extracted?.children) && (
+              <div className="mt-4">
+                <h4 className="font-medium mb-2">ילדים</h4>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-1 text-right font-medium">שם</th>
+                      <th className="py-1 text-right font-medium">ת.ז.</th>
+                      <th className="py-1 text-right font-medium">תאריך לידה</th>
+                      <th className="py-1 text-right font-medium">שנת לידה</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(doc.extracted.children as Array<{name?: string; id_number?: string; birth_date?: string; birth_year?: number}>).map((child, ci) => (
+                      <tr key={ci} className="border-b last:border-0">
+                        <td className="py-1">{child.name || '—'}</td>
+                        <td className="py-1">{child.id_number || '—'}</td>
+                        <td className="py-1">{child.birth_date || '—'}</td>
+                        <td className="py-1">{child.birth_year || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {doc.extraction_warnings?.length ? (
+              <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {doc.extraction_warnings.map((warning) => (
+                  <div key={warning}>{warning}</div>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-4 flex items-center gap-3">
               <Button
                 onClick={() => saveCorrections(doc.doc_id)}
@@ -444,12 +555,18 @@ export function DocumentsPage() {
                 <Save className="ml-2 h-4 w-4" />
                 שמור תיקונים
               </Button>
+              <Button variant="outline" onClick={() => reextractDocument(doc.doc_id)} disabled={reextractStatus[doc.doc_id] === 'running'}>
+                {reextractStatus[doc.doc_id] === 'running' ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="ml-2 h-4 w-4" />}
+                חלץ מחדש
+              </Button>
               {saveStatus[doc.doc_id] === 'saving' && <Loader2 className="h-4 w-4 animate-spin" />}
               {saveStatus[doc.doc_id] === 'saved' && (
                 <span className="flex items-center gap-1 text-sm text-green-600">
                   <Check className="h-4 w-4" /> נשמר בהצלחה
                 </span>
               )}
+              {reextractStatus[doc.doc_id] === 'done' && <span className="text-sm text-green-600">החילוץ רוענן</span>}
+              {reextractStatus[doc.doc_id] === 'error' && <span className="text-sm text-destructive">שגיאה בחילוץ מחדש</span>}
               {saveStatus[doc.doc_id] === 'error' && (
                 <span className="text-sm text-destructive">שגיאה בשמירה</span>
               )}
@@ -493,6 +610,131 @@ export function DocumentsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Document Viewer Dialog */}
+      <Dialog open={viewerDoc !== null} onClose={() => setViewerDoc(null)}>
+        {viewerDoc && (() => {
+          const vDocType = viewerDoc.document_type || 'form_106'
+          const vFieldMap = getFieldMap(vDocType)
+          const vTypeLabel = DOC_TYPE_LABELS[vDocType] || vDocType
+          const isImage = viewerDoc.original_filename.match(/\.(jpg|jpeg|png|webp)$/i)
+          const isExcel = viewerDoc.original_filename.match(/\.xlsx$/i)
+          const fileUrl = `/api/documents/${viewerDoc.doc_id}/file`
+
+          return (
+            <>
+              <DialogHeader onClose={() => setViewerDoc(null)}>
+                <DialogTitle>{vTypeLabel} — {viewerDoc.original_filename}</DialogTitle>
+              </DialogHeader>
+              <DialogContent className="p-0">
+                <div className="flex h-[75vh]">
+                  {/* Right side: Document preview */}
+                  <div className="flex-1 border-l bg-muted/30 overflow-auto">
+                    {isExcel ? (
+                      <div className="flex h-full items-center justify-center text-muted-foreground">
+                        <p>תצוגת Excel לא נתמכת — ניתן לפתוח את הקובץ ישירות</p>
+                      </div>
+                    ) : isImage ? (
+                      <img
+                        src={fileUrl}
+                        alt={viewerDoc.original_filename}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <iframe
+                        src={fileUrl}
+                        className="h-full w-full"
+                        title={viewerDoc.original_filename}
+                      />
+                    )}
+                  </div>
+                  {/* Left side: Extracted fields */}
+                  <div className="w-[400px] shrink-0 overflow-auto p-4">
+                    <h3 className="mb-3 font-semibold text-sm">נתונים שחולצו</h3>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="py-2 text-right font-medium">שדה</th>
+                          <th className="py-2 text-right font-medium">ערך</th>
+                          <th className="py-2 text-right font-medium">ביטחון</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(vFieldMap).map(([field, meta]) => {
+                          const fv = getFieldValue(viewerDoc, field)
+                          return (
+                            <tr key={field} className="border-b last:border-0">
+                              <td className="py-2 font-medium">{meta.label_he}</td>
+                              <td className="py-2">
+                                <Input
+                                  type={meta.type === 'number' ? 'number' : 'text'}
+                                  value={fv.value ?? ''}
+                                  onChange={(e) => setFieldEdit(viewerDoc.doc_id, field, e.target.value, meta)}
+                                  className="h-7 w-32 text-sm"
+                                />
+                              </td>
+                              <td className="py-2">{confidenceBadge(fv.confidence)}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {vDocType === 'id_supplement' && Array.isArray(viewerDoc.extracted?.children) && (
+                      <div className="mt-4">
+                        <h4 className="font-medium mb-2 text-sm">ילדים</h4>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="py-1 text-right font-medium">שם</th>
+                              <th className="py-1 text-right font-medium">שנת לידה</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(viewerDoc.extracted.children as Array<{name?: string; birth_year?: number}>).map((child, ci) => (
+                              <tr key={ci} className="border-b last:border-0">
+                                <td className="py-1">{child.name || '—'}</td>
+                                <td className="py-1">{child.birth_year || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div className="mt-4">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          onClick={() => saveCorrections(viewerDoc.doc_id)}
+                          disabled={!editedFields[viewerDoc.doc_id] || Object.keys(editedFields[viewerDoc.doc_id]).length === 0}
+                          size="sm"
+                        >
+                          <Save className="ml-2 h-4 w-4" />
+                          שמור תיקונים
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => reextractDocument(viewerDoc.doc_id)} disabled={reextractStatus[viewerDoc.doc_id] === 'running'}>
+                          {reextractStatus[viewerDoc.doc_id] === 'running' ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="ml-2 h-4 w-4" />}
+                          חלץ מחדש
+                        </Button>
+                      </div>
+                      {viewerDoc.extraction_warnings?.length ? (
+                        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          {viewerDoc.extraction_warnings.map((warning) => (
+                            <div key={warning}>{warning}</div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {saveStatus[viewerDoc.doc_id] === 'saved' && (
+                        <span className="mr-2 text-sm text-green-600">נשמר</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </DialogContent>
+            </>
+          )
+        })()}
+      </Dialog>
+
+      <FloatingChat snapshot={chatSnapshot} />
     </div>
   )
 }

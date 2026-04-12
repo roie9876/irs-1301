@@ -1,4 +1,4 @@
-"""Tests for tax rules engine — validates against real filed reports (2022-2024).
+"""Tests for tax rules engine — validates against filed report totals (2022-2024).
 
 Reference data extracted from official IRS שומה (tax assessment) documents:
 - 2022 שומה: full breakdown available
@@ -32,16 +32,16 @@ def test_get_rules_missing_year():
 
 
 def test_progressive_tax_personal_labor_2024():
-    """Validate against the filed report: Roie salary 500,000 → tax 132,303."""
+    """Validate against the filed report: taxpayer salary 500,000 → tax 132,303."""
     rules = get_rules(2024)
     tax = compute_progressive_tax(500_000, rules, personal_labor=True)
-    # The filed report shows 132,303 for regular rates on Roie's income.
+    # The filed report shows 132,303 for regular rates on taxpayer income.
     # Allow small rounding tolerance.
     assert abs(tax - 132_303) <= 5, f"Expected ~132,303 but got {tax}"
 
 
 def test_progressive_tax_spouse_2024():
-    """Validate against the filed report: Michal salary 200,000 → tax 30,074."""
+    """Validate against the filed report: spouse salary 200,000 → tax 30,074."""
     rules = get_rules(2024)
     tax = compute_progressive_tax(200_000, rules, personal_labor=True)
     assert abs(tax - 30_074) <= 5, f"Expected ~30,074 but got {tax}"
@@ -75,9 +75,9 @@ def test_surtax_per_person_2024():
     """Validate against filed report: surtax is per-person, not joint.
 
     Filed report shows 8,353.
-    Taxpayer (Roie): 500,000 + 100,000 + 40,000 = 1,000,000
+    Taxpayer: 500,000 + 100,000 + 40,000 = 1,000,000
     (1,000,000 - 721,560) * 0.03 = 8,353 ✓
-    Spouse (Michal): 200,000 — below threshold, no surtax.
+    Spouse: 200,000 — below threshold, no surtax.
     """
     rules = get_rules(2024)
     # Taxpayer income (without spouse)
@@ -153,36 +153,36 @@ class TestValidation2022:
     """Validate engine against 2022 filed שומה.
 
     Key figures from שומה:
-    - Roie salary: 500,000, Michal salary: 200,000
+    - Taxpayer salary: 500,000, spouse salary: 200,000
     - Rental: 80,000, Dividends: 20,000
-    - Progressive (Roie): 132,303, Progressive (Michal): 30,074
+    - Progressive (taxpayer): 132,303, Progressive (spouse): 30,074
     - Surtax: 8,353, Rental 10%: 11,160, Dividend 25%: 8,304
-    - Roie gross: 200,000, Total gross: 250,000
-    - Credits Roie: 17,246, Credits Michal: 26,599
+    - Taxpayer gross: 200,000, Total gross: 250,000
+    - Credits taxpayer: 17,246, Credits spouse: 26,599
     - Net tax (מס מגיע): 180,000
     - Withheld: 170,000, Payments: 14,508
     - Balance: -1,199 (refund)
     """
 
-    def test_progressive_tax_roie_2022(self):
+    def test_progressive_tax_taxpayer_2022(self):
         rules = get_rules(2022)
         tax = compute_progressive_tax(500_000, rules, personal_labor=True)
         assert abs(tax - 132_303) <= 1, f"Expected 132,303 ±1 but got {tax}"
 
-    def test_progressive_tax_michal_2022(self):
+    def test_progressive_tax_spouse_2022(self):
         rules = get_rules(2022)
         tax = compute_progressive_tax(200_000, rules, personal_labor=True)
         assert tax == 30_074
 
     def test_surtax_per_person_2022(self):
-        """Surtax on Roie only: (500,000 + 80,000 + 20,000 - 663,240) × 3%."""
+        """Surtax on taxpayer only: (500,000 + 80,000 + 20,000 - 663,240) × 3%."""
         rules = get_rules(2022)
-        roie_total = 500_000 + 80_000 + 20_000  # 1,000,000
-        surtax = compute_surtax(roie_total, rules)
+        taxpayer_total = 500_000 + 80_000 + 20_000  # 1,000,000
+        surtax = compute_surtax(taxpayer_total, rules)
         assert surtax == 8_353
 
-    def test_surtax_michal_zero_2022(self):
-        """Michal income 200,000 is below threshold 663,240."""
+    def test_surtax_spouse_zero_2022(self):
+        """Spouse income 200,000 is below threshold 663,240."""
         rules = get_rules(2022)
         assert compute_surtax(200_000, rules) == 0
 
@@ -192,8 +192,8 @@ class TestValidation2022:
     def test_dividend_tax_2022(self):
         assert round(20_000 * 0.25) == 5_000
 
-    def test_roie_gross_tax_2022(self):
-        """Roie gross = progressive + surtax + rental + dividend."""
+    def test_taxpayer_gross_tax_2022(self):
+        """Taxpayer gross = progressive + surtax + rental + dividend."""
         rules = get_rules(2022)
         progressive = compute_progressive_tax(500_000, rules)
         surtax = compute_surtax(500_000 + 80_000 + 20_000, rules)
@@ -209,34 +209,34 @@ class TestValidation2022:
         cp = rules.credit_point_value  # 2,676
 
         # Gross tax
-        roie_gross_tax = (
+        taxpayer_gross_tax = (
             compute_progressive_tax(500_000, rules)
             + compute_surtax(500_000 + 80_000 + 20_000, rules)
             + round(80_000 * 0.10)
             + round(20_000 * 0.25)
         )
-        michal_gross_tax = compute_progressive_tax(200_000, rules)
+        spouse_gross_tax = compute_progressive_tax(200_000, rules)
 
         # Credits (from שומה breakdown)
-        roie_credits = (
+        taxpayer_credits = (
             round(2.25 * cp)  # resident: 6,021
             + round(3 * cp)  # children: 8,028
             + 3_000  # 45a pension credit
         )
-        assert roie_credits == 15_000
+        assert taxpayer_credits == 15_000
 
-        michal_credits = (
+        spouse_credits = (
             round(2.25 * cp)  # resident: 6,021
             + round(6 * cp)  # children: 16,056
             + round(0.5 * cp)  # woman: 1,338
             + 3_000  # 45a(h) pension+insurance credit
         )
-        assert michal_credits == 20_000
+        assert spouse_credits == 20_000
 
-        # Net tax (excess Michal credits don't transfer)
-        roie_net = max(0, roie_gross_tax - roie_credits)
-        michal_net = max(0, michal_gross_tax - michal_credits)
-        total_net = roie_net + michal_net
+        # Net tax (excess spouse credits don't transfer)
+        taxpayer_net = max(0, taxpayer_gross_tax - taxpayer_credits)
+        spouse_net = max(0, spouse_gross_tax - spouse_credits)
+        total_net = taxpayer_net + spouse_net
         assert abs(total_net - 180_000) <= 1
 
         # Balance (before interest)
@@ -253,33 +253,33 @@ class TestValidation2023:
     """Validate engine against 2023 filed 1301 data.
 
     Key figures from 1301 submission:
-    - Roie salary: 500,000, Michal salary: 200,000
+    - Taxpayer salary: 500,000, spouse salary: 200,000
     - Rental: 80,000, Dividends: 40,000, Capital gains: 405
-    - Tax withheld Roie: 130,000, Michal: 6,252
+    - Tax withheld taxpayer: 130,000, spouse: 6,252
     - Rental tax paid: 17,693 (= 80,000 × 13% = 10% + 3% surtax)
     - Refund: 1,734
     """
 
-    def test_progressive_tax_roie_2023(self):
+    def test_progressive_tax_taxpayer_2023(self):
         rules = get_rules(2023)
         tax = compute_progressive_tax(500_000, rules, personal_labor=True)
         # No שומה to compare, but value should be consistent
         assert 740_000 < tax < 760_000, f"Unexpected progressive tax: {tax}"
 
-    def test_progressive_tax_michal_2023(self):
+    def test_progressive_tax_spouse_2023(self):
         rules = get_rules(2023)
         tax = compute_progressive_tax(200_000, rules, personal_labor=True)
         assert 28_000 < tax < 33_000, f"Unexpected progressive tax: {tax}"
 
     def test_surtax_per_person_2023(self):
-        """Surtax on Roie: (salary + rental + dividends + CG - threshold) × 3%."""
+        """Surtax on taxpayer: (salary + rental + dividends + CG - threshold) × 3%."""
         rules = get_rules(2023)
-        roie_total = 500_000 + 80_000 + 40_000 + 405  # 1,000,000
-        surtax = compute_surtax(roie_total, rules)
+        taxpayer_total = 500_000 + 80_000 + 40_000 + 405  # 1,000,000
+        surtax = compute_surtax(taxpayer_total, rules)
         expected = round((1_000_000 - 698_280) * 0.03)  # 39,969
         assert surtax == expected
 
-    def test_surtax_michal_zero_2023(self):
+    def test_surtax_spouse_zero_2023(self):
         rules = get_rules(2023)
         assert compute_surtax(200_000, rules) == 0
 

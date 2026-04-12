@@ -1,14 +1,65 @@
-from fastapi import APIRouter, Query
+import logging
 
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
+
+from app.schemas.advisor import AdvisorAnswerResponse, AdvisorQuestionRequest, ChatRequest
+
+logger = logging.getLogger(__name__)
 from app.schemas.form1301 import Form1301PreviewResponse
+from app.schemas.field_help import FieldHelpResponse
+from app.services.advisor_ai import answer_advisor_question, answer_chat_question
+from app.services.field_help import get_field_help
 from app.services.form1301 import compute_form1301
 
 router = APIRouter(tags=["form1301"])
 
 
+@router.get("/form-1301/field-help/{code}", response_model=FieldHelpResponse)
+async def field_help(code: str):
+    return get_field_help(code)
+
+
+@router.post("/form-1301/assistant", response_model=AdvisorAnswerResponse)
+async def form1301_assistant(body: AdvisorQuestionRequest):
+    answer = await answer_advisor_question(body)
+    return AdvisorAnswerResponse(answer=answer)
+
+
+@router.post("/form-1301/chat", response_model=AdvisorAnswerResponse)
+async def form1301_chat(body: ChatRequest):
+    try:
+        answer = await answer_chat_question(
+            question=body.question,
+            tax_year=body.tax_year,
+            form_summary=body.form_summary,
+            source_documents=body.source_documents,
+            warnings=body.warnings,
+            balance=body.balance,
+            net_tax=body.net_tax,
+        )
+        return AdvisorAnswerResponse(answer=answer)
+    except ValueError as exc:
+        logger.warning("Chat LLM config error: %s", exc)
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
+    except Exception as exc:
+        logger.exception("Chat LLM call failed")
+        return JSONResponse(
+            status_code=502,
+            content={"detail": f"שגיאה בתקשורת עם מודל השפה: {type(exc).__name__}"},
+        )
+
+
 @router.get("/form-1301/preview", response_model=Form1301PreviewResponse)
 async def preview_form1301(
     year: int = Query(2024, description="Tax year"),
+    marital_status: str = Query(""),
+    has_joint_income_source: bool = Query(False),
+    spouse_assists_income: bool = Query(False),
+    immigrant_taxpayer_status: str = Query(""),
+    immigrant_taxpayer_arrival_date: str = Query(""),
+    immigrant_spouse_status: str = Query(""),
+    immigrant_spouse_arrival_date: str = Query(""),
     # חלק ג — הכנסות מיגיעה אישית
     business_income_taxpayer: float = Query(0),
     business_income_spouse: float = Query(0),
@@ -81,8 +132,16 @@ async def preview_form1301(
     children_credit_points_taxpayer: float = Query(0),
     children_credit_points_spouse: float = Query(0),
     single_parent_points: float = Query(0),
+    soldier_release_date_taxpayer: str = Query(""),
+    soldier_release_date_spouse: str = Query(""),
+    soldier_service_months_taxpayer: int = Query(0),
+    soldier_service_months_spouse: int = Query(0),
     academic_code_taxpayer: str = Query(""),
     academic_code_spouse: str = Query(""),
+    academic_completion_year_taxpayer: int = Query(0),
+    academic_completion_year_spouse: int = Query(0),
+    academic_study_years_taxpayer: int = Query(0),
+    academic_study_years_spouse: int = Query(0),
     # חלק יד — זיכויים
     life_insurance_taxpayer: float = Query(0),
     life_insurance_spouse: float = Query(0),
@@ -113,6 +172,13 @@ async def preview_form1301(
 ):
     result = compute_form1301(
         year=year,
+        marital_status=marital_status,
+        has_joint_income_source=has_joint_income_source,
+        spouse_assists_income=spouse_assists_income,
+        immigrant_taxpayer_status=immigrant_taxpayer_status,
+        immigrant_taxpayer_arrival_date=immigrant_taxpayer_arrival_date,
+        immigrant_spouse_status=immigrant_spouse_status,
+        immigrant_spouse_arrival_date=immigrant_spouse_arrival_date,
         business_income_taxpayer=business_income_taxpayer,
         business_income_spouse=business_income_spouse,
         nii_self_employed_taxpayer=nii_self_employed_taxpayer,
@@ -178,8 +244,16 @@ async def preview_form1301(
         children_credit_points_taxpayer=children_credit_points_taxpayer,
         children_credit_points_spouse=children_credit_points_spouse,
         single_parent_points=single_parent_points,
+        soldier_release_date_taxpayer=soldier_release_date_taxpayer,
+        soldier_release_date_spouse=soldier_release_date_spouse,
+        soldier_service_months_taxpayer=soldier_service_months_taxpayer,
+        soldier_service_months_spouse=soldier_service_months_spouse,
         academic_code_taxpayer=academic_code_taxpayer,
         academic_code_spouse=academic_code_spouse,
+        academic_completion_year_taxpayer=academic_completion_year_taxpayer,
+        academic_completion_year_spouse=academic_completion_year_spouse,
+        academic_study_years_taxpayer=academic_study_years_taxpayer,
+        academic_study_years_spouse=academic_study_years_spouse,
         life_insurance_taxpayer=life_insurance_taxpayer,
         life_insurance_spouse=life_insurance_spouse,
         survivors_insurance_taxpayer=survivors_insurance_taxpayer,

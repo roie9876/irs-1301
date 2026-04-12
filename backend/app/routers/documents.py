@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app.schemas.documents import (
     EXTRACTION_MODELS,
@@ -44,6 +45,35 @@ EXTRACTORS = {
 }
 
 
+def _normalize_digits(value: str) -> str:
+    return "".join(ch for ch in value if ch.isdigit())
+
+
+def _normalize_name(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def _sanitize_id_supplement_extraction(extracted_data: dict) -> tuple[dict, list[ChildInfo], list[str]]:
+    sanitized = dict(extracted_data)
+    children_raw = sanitized.pop("children", [])
+    children = [ChildInfo(**child) for child in children_raw if isinstance(child, dict)]
+    warnings: list[str] = []
+
+    child_ids = {_normalize_digits(child.id_number) for child in children if child.id_number}
+    child_names = {_normalize_name(child.name) for child in children if child.name}
+
+    spouse_id = _normalize_digits(str(sanitized.get("spouse_id", {}).get("value", ""))) if isinstance(sanitized.get("spouse_id"), dict) else ""
+    spouse_name = _normalize_name(str(sanitized.get("spouse_name", {}).get("value", ""))) if isinstance(sanitized.get("spouse_name"), dict) else ""
+
+    if (spouse_id and spouse_id in child_ids) or (spouse_name and spouse_name in child_names):
+        sanitized["spouse_name"] = {"value": None, "confidence": 0.0}
+        sanitized["spouse_id"] = {"value": None, "confidence": 0.0}
+        sanitized["spouse_birth_date"] = {"value": None, "confidence": 0.0}
+        warnings.append("זיהוי בן/בת הזוג בספח בוטל כי הערכים התאימו לאחד הילדים")
+
+    return sanitized, children, warnings
+
+
 def _find_sidecar(doc_id: str) -> Path | None:
     """Find sidecar file by doc_id, checking both old and new suffixes."""
     if not DOCUMENTS_DIR.exists():
@@ -67,6 +97,65 @@ def _list_sidecars() -> list[Path]:
     paths = list(DOCUMENTS_DIR.glob(f"*{SIDECAR_SUFFIX}"))
     paths += [p for p in DOCUMENTS_DIR.glob("*.106.json") if not p.name.endswith(SIDECAR_SUFFIX)]
     return sorted(set(paths))
+
+
+async def _reextract_document_sidecar(sidecar_path: Path) -> dict:
+    data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    doc_id = data["doc_id"]
+    document_type = data.get("document_type", "unknown")
+    filename = data.get("original_filename", "?")
+
+    if document_type not in EXTRACTORS and document_type != "id_supplement":
+        return {"doc_id": doc_id, "filename": filename, "status": "skipped", "reason": f"no extractor for {document_type}"}
+
+    if data.get("user_corrected"):
+        return {"doc_id": doc_id, "filename": filename, "status": "skipped", "reason": "user_corrected"}
+
+    source_path = None
+    for candidate in DOCUMENTS_DIR.glob(f"{doc_id}_*"):
+        if candidate.name.endswith(SIDECAR_SUFFIX) or candidate.name.endswith(".106.json"):
+            continue
+        source_path = candidate
+        break
+
+    if source_path is None or not source_path.exists():
+        return {"doc_id": doc_id, "filename": filename, "status": "error", "reason": "PDF not found"}
+
+    model_cls = EXTRACTION_MODELS[document_type]
+
+    if document_type == "id_supplement":
+        image_bytes = source_path.read_bytes()
+        extracted_data = await extract_id_supplement_data(image_bytes, source_path.name)
+        extracted_data, children, extraction_warnings = _sanitize_id_supplement_extraction(extracted_data)
+        extraction_obj = IdSupplementExtraction(
+            **{
+                k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+                for k, v in extracted_data.items()
+                if k in IdSupplementExtraction.model_fields and k != "children"
+            },
+            children=children,
+        )
+    else:
+        raw_text = extract_text_from_pdf(str(source_path))
+        if not raw_text.strip():
+            return {"doc_id": doc_id, "filename": filename, "status": "error", "reason": "empty text"}
+
+        extractor = EXTRACTORS[document_type]
+        extracted_data = await extractor(raw_text)
+        extraction_warnings = []
+        extraction_obj = model_cls(**{
+            k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+            for k, v in extracted_data.items()
+            if k in model_cls.model_fields
+        })
+
+    data["extracted"] = extraction_obj.model_dump()
+    data["extraction_warnings"] = extraction_warnings
+    sidecar_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {"doc_id": doc_id, "filename": filename, "status": "success", "warnings": extraction_warnings}
 
 
 @router.post("/documents/upload", response_model=UploadResponse)
@@ -159,10 +248,7 @@ async def upload_documents(
                 # Image files: treat as ID supplement (ספח תעודת זהות)
                 doc_type = "id_supplement"
                 extracted_data = await extract_id_supplement_data(content, filename)
-
-                # Build children list from extracted data
-                children_raw = extracted_data.pop("children", [])
-                children = [ChildInfo(**c) for c in children_raw if isinstance(c, dict)]
+                extracted_data, children, extraction_warnings = _sanitize_id_supplement_extraction(extracted_data)
 
                 extraction_obj = IdSupplementExtraction(
                     **{
@@ -181,6 +267,8 @@ async def upload_documents(
                     "extracted": extraction_obj.model_dump(),
                     "user_corrected": False,
                 }
+                if extraction_warnings:
+                    sidecar["extraction_warnings"] = extraction_warnings
                 sidecar_path.write_text(
                     json.dumps(sidecar, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -211,13 +299,14 @@ async def upload_documents(
             doc_type = classification.get("document_type", "unknown")
 
             if doc_type not in EXTRACTORS:
-                # Unknown — still save the PDF but skip extraction
+                # Not a source document — skip gracefully
+                desc = classification.get('description', doc_type)
                 results.append(UploadResult(
                     filename=filename,
                     doc_id=doc_id,
-                    status="error",
+                    status="skipped",
                     document_type=doc_type,
-                    error=f"סוג מסמך לא נתמך: {classification.get('description', doc_type)}",
+                    error=f"סוג מסמך לא נתמך: {desc}. זה לא אחד מסוגי המסמכים הנתמכים ברשימה.",
                 ))
                 continue
 
@@ -284,11 +373,34 @@ async def list_documents():
                 document_type=doc_type,
                 extracted=data["extracted"],
                 user_corrected=data.get("user_corrected", False),
+                extraction_warnings=data.get("extraction_warnings", []),
             ))
         except (json.JSONDecodeError, KeyError):
             continue
 
     return DocumentListResponse(documents=documents)
+
+
+@router.get("/documents/{doc_id}/file")
+async def get_document_file(doc_id: str):
+    """Serve the original uploaded document file (PDF/image)."""
+    if not DOCUMENTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="מסמך לא נמצא")
+    # Find file matching doc_id prefix (excluding sidecars)
+    for path in DOCUMENTS_DIR.iterdir():
+        if path.name.startswith(f"{doc_id}_") and not path.name.endswith(SIDECAR_SUFFIX):
+            media_types = {
+                ".pdf": "application/pdf",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".webp": "image/webp",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }
+            suffix = path.suffix.lower()
+            media_type = media_types.get(suffix, "application/octet-stream")
+            return FileResponse(path, media_type=media_type)
+    raise HTTPException(status_code=404, detail="קובץ מסמך לא נמצא")
 
 
 @router.put("/documents/{doc_id}", response_model=DocumentInfo)
@@ -315,6 +427,30 @@ async def update_document(doc_id: str, body: UpdateFieldsRequest):
         document_type=data.get("document_type", "form_106"),
         extracted=data["extracted"],
         user_corrected=True,
+        extraction_warnings=data.get("extraction_warnings", []),
+    )
+
+
+@router.post("/documents/{doc_id}/reextract", response_model=DocumentInfo)
+async def reextract_document(doc_id: str):
+    sidecar_path = _find_sidecar(doc_id)
+    if sidecar_path is None:
+        raise HTTPException(status_code=404, detail="מסמך לא נמצא")
+
+    result = await _reextract_document_sidecar(sidecar_path)
+    if result["status"] == "skipped":
+        raise HTTPException(status_code=400, detail=f"לא ניתן לחלץ מחדש: {result['reason']}")
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=f"חילוץ מחדש נכשל: {result['reason']}")
+
+    data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    return DocumentInfo(
+        doc_id=data["doc_id"],
+        original_filename=data["original_filename"],
+        document_type=data.get("document_type", "form_106"),
+        extracted=data["extracted"],
+        user_corrected=data.get("user_corrected", False),
+        extraction_warnings=data.get("extraction_warnings", []),
     )
 
 
@@ -332,3 +468,92 @@ async def delete_document(doc_id: str):
             pdf_path.unlink()
 
     return {"ok": True}
+
+
+@router.post("/documents/reextract-all")
+async def reextract_all_documents(doc_type: str | None = None):
+    """Re-extract all PDF documents using updated prompts. Skips user-corrected docs.
+    Optional doc_type filter: 'form_106', 'form_867', etc.
+    """
+    results: list[dict] = []
+    for sidecar_path in _list_sidecars():
+        try:
+            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+        doc_id = data["doc_id"]
+        document_type = data.get("document_type", "unknown")
+        filename = data.get("original_filename", "?")
+
+        if doc_type and document_type != doc_type:
+            results.append({"doc_id": doc_id, "filename": filename, "status": "skipped", "reason": f"type {document_type} != {doc_type}"})
+            continue
+
+        if data.get("user_corrected"):
+            results.append({"doc_id": doc_id, "filename": filename, "status": "skipped", "reason": "user_corrected"})
+            continue
+
+        if document_type not in EXTRACTORS and document_type != "id_supplement":
+            results.append({"doc_id": doc_id, "filename": filename, "status": "skipped", "reason": f"no extractor for {document_type}"})
+            continue
+
+        # Find the source PDF
+        pdf_path = None
+        for candidate in DOCUMENTS_DIR.glob(f"{doc_id}_*"):
+            if candidate.name.endswith(SIDECAR_SUFFIX) or candidate.name.endswith(".106.json"):
+                continue
+            pdf_path = candidate
+            break
+
+        if pdf_path is None or not pdf_path.exists():
+            results.append({"doc_id": doc_id, "filename": filename, "status": "error", "reason": "PDF not found"})
+            continue
+
+        try:
+            model_cls = EXTRACTION_MODELS[document_type]
+
+            if document_type == "id_supplement":
+                image_bytes = pdf_path.read_bytes()
+                extracted_data = await extract_id_supplement_data(image_bytes, pdf_path.name)
+                extracted_data, children, extraction_warnings = _sanitize_id_supplement_extraction(extracted_data)
+                extraction_obj = IdSupplementExtraction(
+                    **{
+                        k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+                        for k, v in extracted_data.items()
+                        if k in IdSupplementExtraction.model_fields and k != "children"
+                    },
+                    children=children,
+                )
+            else:
+                raw_text = extract_text_from_pdf(str(pdf_path))
+                if not raw_text.strip():
+                    results.append({"doc_id": doc_id, "filename": filename, "status": "error", "reason": "empty text"})
+                    continue
+
+                extractor = EXTRACTORS[document_type]
+                extracted_data = await extractor(raw_text)
+
+                extraction_obj = model_cls(**{
+                    k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+                    for k, v in extracted_data.items()
+                    if k in model_cls.model_fields
+                })
+
+            old_extracted = data.get("extracted", {})
+            outcome = await _reextract_document_sidecar(sidecar_path)
+            if outcome["status"] != "success":
+                results.append(outcome)
+                continue
+
+            refreshed = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            diffs = []
+            for field, new_val in refreshed["extracted"].items():
+                old_val = old_extracted.get(field, {}).get("value") if isinstance(old_extracted.get(field), dict) else None
+                val = new_val.get("value") if isinstance(new_val, dict) else None
+                if old_val != val:
+                    diffs.append(field)
+
+            results.append({"doc_id": doc_id, "filename": filename, "status": "reextracted", "changed_fields": diffs, "warnings": refreshed.get("extraction_warnings", [])})
+        except Exception as e:
+            results.append({"doc_id": doc_id, "filename": filename, "status": "error", "reason": str(e)})

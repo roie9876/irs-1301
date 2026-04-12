@@ -155,6 +155,7 @@ class CreditPointsFields(BaseModel):
     # סעיף 72: תואר אקדמאי
     field_181: str = ""   # קוד לימודים — רשום
     field_182: str = ""   # קוד לימודים — בן/בת זוג
+    spouse_helper_points: float = 0
     # Totals (computed)
     credit_points_taxpayer: float = 0
     credit_points_spouse: float = 0
@@ -225,6 +226,8 @@ class TaxCalculation(BaseModel):
     # Credits
     credit_points_amount_taxpayer: float = 0
     credit_points_amount_spouse: float = 0
+    shift_work_credit_taxpayer: float = 0
+    shift_work_credit_spouse: float = 0
     pension_employee_credit_taxpayer: float = 0  # סעיף 75
     pension_employee_credit_spouse: float = 0
     life_insurance_credit_taxpayer: float = 0  # סעיף 73
@@ -263,6 +266,8 @@ class Form1301Result(BaseModel):
     # Source tracking
     source_documents: list[str] = []
     warnings: list[str] = []
+    # Auto-populated values (field_name → effective value from documents)
+    effective_inputs: dict[str, float] = {}
 
 
 class Form1301PreviewResponse(BaseModel):

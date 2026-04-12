@@ -1,521 +1,620 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Calculator, AlertTriangle, TrendingDown, TrendingUp, Loader2, FileText, CheckCircle2, PenLine, ChevronDown, ChevronUp } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Calculator, AlertTriangle, TrendingDown, TrendingUp,
+  Loader2, FileText, CheckCircle2, Save,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTaxYear } from '@/lib/tax-year-context'
 import {
   api,
   type DocumentInfo,
   type DocumentListResponse,
+  type FieldHelpResponse,
   type Form1301PreviewResponse,
   type Form1301Result,
 } from '@/lib/api'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { FloatingChat, type FormSnapshot, type FloatingChatHandle } from '@/components/FloatingChat'
 
-const DOC_TYPE_LABELS: Record<string, string> = {
-  form_106: 'טופס 106',
-  form_867: 'טופס 867 (דיבידנד/ריבית)',
-  rental_payment: 'אישור תשלום מס שכירות',
-  annual_summary: 'דוח שנתי מניות',
-  receipt: 'קבלה/חשבונית',
-  rental_excel: 'קובץ Excel שכירות',
-  unknown: 'מסמך לא מזוהה',
-}
+type FormTab = 'personal' | 'general' | 'income'
 
-function formatNIS(amount: number): string {
-  return new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(amount)
-}
-
-// --- Form field definitions matching IRS 1301 sections ---
-interface FormFieldDef {
+type GeneralRow = {
   code: string
   label: string
-  key: string          // path into Form1301Result (e.g., 'income.field_158')
-  source?: string      // auto-population source description
-  inputKey?: string    // if manually editable, the key in inputs state
+  explanation: string
+  type: 'radio' | 'checkbox' | 'select' | 'immigrant-status-date' | 'radio-with-select' | 'radio-with-text' | 'checkbox-group'
+  options?: Array<{ value: string; label: string }>
+  hint?: string
+  displayCode?: string
 }
 
-interface FormSectionDef {
-  id: string
-  partId: string
-  title: string
-  description?: string
-  fields: FormFieldDef[]
-}
+const PERSONAL_STATUS_OPTIONS = ['רווק', 'נשוי', 'אלמן', 'גרוש', 'פרוד']
 
-const FORM_SECTIONS: FormSectionDef[] = [
-  // === חלק ג — הכנסות מיגיעה אישית ===
+const PERSONAL_SUMMARY_FIELDS = [
+  { key: 'tax_file_number', label: 'מספר תיק' },
+  { key: 'tax_year', label: 'שנת מס' },
+  { key: 'taxpayer_first_name', label: 'שם פרטי' },
+  { key: 'taxpayer_last_name', label: 'שם משפחה' },
+  { key: 'taxpayer_occupation', label: 'עיסוק' },
+  { key: 'branch_code', label: 'פקיד שומה' },
+]
+
+const GENERAL_INFO_SECTIONS: Array<{ title: string; rows: GeneralRow[] }> = [
   {
-    id: 'business',
-    partId: 'ג',
-    title: 'סעיף 1 — הכנסה מעסק או משלח יד',
-    fields: [
-      { code: '150', label: 'עסק/משלח יד — נישום', key: 'income.field_150', inputKey: 'business_income_taxpayer' },
-      { code: '170', label: 'עסק/משלח יד — בן/בת זוג', key: 'income.field_170', inputKey: 'business_income_spouse' },
+    title: 'פרטים כלליים והצהרות בסיס',
+    rows: [
+      { code: 'foreign_income_file', label: 'האם אחד מבעלי מספר תיק - הכנסות מחו"ל?', explanation: 'סמן כן אם לך או לבן/בת הזוג היו הכנסות מחוץ לישראל שצריך לדווח עליהן, למשל שכר, דיבידנד, ריבית, שכירות או עסק בחו"ל.', type: 'radio', displayCode: 'חו"ל' },
+      { code: 'foreign_income_household', label: 'האם היו לך/לבן זוגך הכנסות חוץ?', explanation: 'זו שאלה דומה אך ברמת משק הבית. אם למי מכם הייתה הכנסה ממקור זר במהלך השנה, בחר כן.', type: 'radio', displayCode: 'חו"ל' },
+      {
+        code: 'settlement_type',
+        label: 'סוג היישוב',
+        explanation: 'בחר את סוג היישוב רק אם הייתה זכאות להטבת מס כתושב יישוב מזכה. ברוב המקרים בוחרים יישוב רגיל.',
+        type: 'select',
+        options: [
+          { value: 'regular', label: 'יישוב רגיל' },
+          { value: 'priority_a', label: 'יישוב מזכה א' },
+          { value: 'priority_b', label: 'יישוב מזכה ב' },
+          { value: 'development', label: 'עיירת פיתוח / אזור מוטב' },
+        ],
+      },
+      {
+        code: 'aliyah_household_scope',
+        label: 'בה"ח/י עולה',
+        explanation: 'זה קיצור לשאלה אם אחד מבני הזוג הוא עולה חדש או תושב חוזר הזכאי להקלות מס, והאם ההקלות מתייחסות להכנסות של משק הבית כולו או רק של אותו אדם.',
+        type: 'select',
+        options: [
+          { value: 'household', label: 'הכנסותי והכנסות בן/בת זוגי' },
+          { value: 'self_only', label: 'הנני בלבד' },
+          { value: 'separate_report', label: 'אני מגיש דוח גם אם לא חלות על הכנסותי הקלות מס' },
+        ],
+      },
+      {
+        code: 'spouse_report_mode',
+        label: 'בן/בת זוג',
+        explanation: 'כאן מציינים אם לבן או לבת הזוג יש דוח נפרד, אין הכנסה, או שהם סייעו בהפקת ההכנסה שלך. זה משפיע על ייחוס הכנסות בין בני הזוג.',
+        type: 'radio-with-select',
+        options: [
+          { value: 'separate_report', label: 'בן/בת זוגי מגיש דוח נפרד' },
+          { value: 'no_income', label: 'אין הכנסה לבן/בת זוגי' },
+          { value: 'assisted_income', label: 'בן/בת זוגי עזר לי בהשגת ההכנסה' },
+        ],
+      },
     ],
   },
   {
-    id: 'nii_self',
-    partId: 'ג',
-    title: 'סעיף 2א — תקבולי ביט"ל כעצמאי',
-    fields: [
-      { code: '250', label: 'ביט"ל עצמאי — נישום', key: 'income.field_250', inputKey: 'nii_self_employed_taxpayer' },
-      { code: '270', label: 'ביט"ל עצמאי — בן/בת זוג', key: 'income.field_270', inputKey: 'nii_self_employed_spouse' },
+    title: 'נתוני משפחה ותושבות',
+    rows: [
+      {
+        code: '331',
+        label: 'מקור הכנסה משותף/ביקור הכנסת משפחתי לבן/בת הזוג',
+        explanation: 'השדה הזה בודק אם יש מקור הכנסה משותף לך ולבן/בת הזוג, או אם בן/בת הזוג סייעו בהפקת ההכנסה. בדרך כלל מסמנים כן רק אם באמת יש פעילות משותפת.',
+        type: 'radio-with-select',
+        options: [
+          { value: 'section_66d', label: 'עמדתי בתנאי סעיף 66(ד) לפקודה' },
+          { value: 'not_section_66d', label: 'לא עמדתי בתנאי סעיף 66(ד) לפקודה' },
+        ],
+      },
+      { code: '273', label: 'בן זוג רשום - עולה חדש/תושב חוזר ותיק/רגיל הזכאי להקלות במס', explanation: 'ממלאים רק אם בן הזוג הרשום קיבל מעמד של עולה חדש או תושב חוזר שמזכה בהטבות מס. יש לציין גם את תאריך העלייה או החזרה.', type: 'immigrant-status-date' },
+      { code: '274', label: 'בן/בת זוג - עולה חדש/תושב חוזר ותיק/רגיל הזכאי להקלות במס', explanation: 'ממלאים רק אם בן או בת הזוג קיבלו מעמד כזה. אם לא, משאירים ריק.', type: 'immigrant-status-date' },
     ],
   },
   {
-    id: 'nii_employee',
-    partId: 'ג',
-    title: 'סעיף 2ב — תקבולי ביט"ל כשכיר',
-    fields: [
-      { code: '194', label: 'ביט"ל שכיר — נישום', key: 'income.field_194', inputKey: 'nii_employee_taxpayer' },
-      { code: '196', label: 'ביט"ל שכיר — בן/בת זוג', key: 'income.field_196', inputKey: 'nii_employee_spouse' },
+    title: 'חו"ל ותכנוני מס',
+    rows: [
+      { code: '297', label: 'האם חלו חובות מחו"ל', explanation: 'סמן כן אם היו חובות דיווח או הכנסות שמקורן מחוץ לישראל ושיש להן השפעה על הדוח.', type: 'radio' },
+      { code: '107', label: 'נכס בחו"ל', explanation: 'סמן אם החזקת נכס מחוץ לישראל, למשל דירה, חשבון השקעות או נכס אחר שיש לו משמעות לדיווח.', type: 'checkbox' },
+      {
+        code: '108',
+        label: 'נאמנות',
+        explanation: 'השדה מיועד למצבים שבהם אתה יוצר, נהנה או מקבל חלוקות מנאמנות. אם אין לך קשר לנאמנות, השאר לא מסומן.',
+        type: 'checkbox-group',
+        options: [
+          { value: 'creator', label: 'יוצר/נהנה בנאמנות - הכנסות הנאמנות כלולות בדוח זה' },
+          { value: 'beneficiary_report', label: 'נהנה בנאמנות שההכנסות שחולקו לי כלולות בדוח זה' },
+          { value: 'beneficiary_distributions', label: 'נהנה בנאמנות שממנה היו לי חלוקות בשנת המס' },
+        ],
+      },
+      {
+        code: '263',
+        label: 'תכנון מס / פעולה החייבת בדיווח',
+        explanation: 'מסמנים כן רק אם בוצעה פעולה שמחייבת דיווח מיוחד לרשות המסים, למשל תכנון מס לפי הרשימות המחייבות. אם אינך יודע, בדרך כלל זה לא סעיף שמסמנים סתם כך.',
+        type: 'radio-with-text',
+        hint: 'כאשר מסומן "כן" יש לציין את קוד הטופס או האסמכתה הרלוונטית.',
+      },
+      { code: '259', label: 'סיום בנייה / דירה לקופה', explanation: 'זהו שדה חריג הקשור למצבים נדל"ניים מסוימים. אם אין לך אירוע כזה או שלא קיבלת הנחיה מפורשת, לרוב בוחרים ברירת מחדל או משאירים ריק.', type: 'select' },
+      { code: '365', label: 'בקשה לייחוס הכנסות בין בני זוג', explanation: 'כאן מסמנים אם מבקשים לייחס הכנסות מסוימות בין בני הזוג לפי הכללים בדין. ממלאים רק אם יש צורך אמיתי בחלוקה שונה של ההכנסות.', type: 'radio' },
     ],
   },
   {
-    id: 'salary',
-    partId: 'ג',
-    title: 'סעיף 3 — הכנסה ממשכורת',
-    fields: [
-      { code: '158', label: 'משכורת — נישום', key: 'income.field_158', source: 'טופס 106' },
-      { code: '172', label: 'משכורת — בן/בת זוג', key: 'income.field_172', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'shifts',
-    partId: 'ג',
-    title: 'סעיף 4 — עבודה במשמרות',
-    fields: [
-      { code: '069', label: 'משמרות — נישום', key: 'income.field_069', inputKey: 'shift_work_taxpayer' },
-      { code: '068', label: 'משמרות — בן/בת זוג', key: 'income.field_068', inputKey: 'shift_work_spouse' },
-    ],
-  },
-  {
-    id: 'retirement',
-    partId: 'ג',
-    title: 'סעיף 5 — מענקי פרישה וקצבאות',
-    fields: [
-      { code: '258', label: 'מענקי פרישה/קצבאות — נישום', key: 'income.field_258', inputKey: 'retirement_grants_taxpayer' },
-      { code: '272', label: 'מענקי פרישה/קצבאות — בן/בת זוג', key: 'income.field_272', inputKey: 'retirement_grants_spouse' },
-    ],
-  },
-  // === חלק ד — הכנסות בשיעורי מס רגילים ===
-  {
-    id: 'real_estate',
-    partId: 'ד',
-    title: 'סעיף 8 — הכנסה מנכס בית',
-    fields: [
-      { code: '059', label: 'נכס בית — נישום', key: 'other_income.field_059', inputKey: 'real_estate_income_taxpayer' },
-      { code: '201', label: 'נכס בית — בן/בת זוג', key: 'other_income.field_201', inputKey: 'real_estate_income_spouse' },
-    ],
-  },
-  {
-    id: 'other_income',
-    partId: 'ד',
-    title: 'סעיף 11 — הכנסות אחרות שאינן מיגיעה אישית',
-    description: 'הכנסה סולארית, השכרת ציוד, תמלוגים',
-    fields: [
-      { code: '167', label: 'הכנסות אחרות — משותף', key: 'other_income.field_167', inputKey: 'other_income_joint' },
-      { code: '305', label: 'הכנסות אחרות — נישום', key: 'other_income.field_305', inputKey: 'other_income_taxpayer' },
-      { code: '205', label: 'הכנסות אחרות — בן/בת זוג', key: 'other_income.field_205', inputKey: 'other_income_spouse' },
-    ],
-  },
-  // === חלק ה — הכנסות בשיעורי מס מיוחדים ===
-  {
-    id: 'interest_sec_15',
-    partId: 'ה',
-    title: 'סעיף 13 — ריבית ני"ע, דיבידנד מפעל מאושר — 15%',
-    fields: [
-      { code: '060', label: 'ריבית ני"ע 15% — נישום', key: 'special_rate.field_060', inputKey: 'interest_securities_15_taxpayer' },
-      { code: '211', label: 'ריבית ני"ע 15% — בן/בת זוג', key: 'special_rate.field_211', inputKey: 'interest_securities_15_spouse' },
-    ],
-  },
-  {
-    id: 'interest_sec_20',
-    partId: 'ה',
-    title: 'סעיף 14 — ריבית ני"ע, קופ"ג — 20%',
-    fields: [
-      { code: '067', label: 'ריבית ני"ע 20% — נישום', key: 'special_rate.field_067', inputKey: 'interest_securities_20_taxpayer' },
-      { code: '228', label: 'ריבית ני"ע 20% — בן/בת זוג', key: 'special_rate.field_228', inputKey: 'interest_securities_20_spouse' },
-    ],
-  },
-  {
-    id: 'interest_sec_25',
-    partId: 'ה',
-    title: 'סעיף 15 — ריבית ני"ע, קופ"ג — 25%',
-    fields: [
-      { code: '157', label: 'ריבית ני"ע 25% — נישום', key: 'special_rate.field_157', inputKey: 'interest_securities_25_taxpayer' },
-      { code: '257', label: 'ריבית ני"ע 25% — בן/בת זוג', key: 'special_rate.field_257', inputKey: 'interest_securities_25_spouse' },
-    ],
-  },
-  {
-    id: 'dividend_preferred',
-    partId: 'ה',
-    title: 'סעיף 16 — דיבידנד מפעל מועדף/מאושר — 20%',
-    fields: [
-      { code: '173', label: 'דיבידנד מועדף 20% — נישום', key: 'special_rate.field_173', inputKey: 'dividend_preferred_20_taxpayer' },
-      { code: '275', label: 'דיבידנד מועדף 20% — בן/בת זוג', key: 'special_rate.field_275', inputKey: 'dividend_preferred_20_spouse' },
-    ],
-  },
-  {
-    id: 'dividend_25',
-    partId: 'ה',
-    title: 'סעיף 17 — דיבידנד — 25%',
-    description: 'דיבידנד ממניות, ESOP, קרנות נאמנות',
-    fields: [
-      { code: '141', label: 'דיבידנד 25% — נישום', key: 'special_rate.field_141', source: 'טופס 867 / דוח שנתי', inputKey: 'dividend_25_taxpayer' },
-      { code: '241', label: 'דיבידנד 25% — בן/בת זוג', key: 'special_rate.field_241', inputKey: 'dividend_25_spouse' },
-    ],
-  },
-  {
-    id: 'dividend_30',
-    partId: 'ה',
-    title: 'סעיף 18 — דיבידנד בעל מניות מהותי — 30%',
-    fields: [
-      { code: '055', label: 'דיבידנד מהותי 30% — נישום', key: 'special_rate.field_055', inputKey: 'dividend_significant_30_taxpayer' },
-      { code: '212', label: 'דיבידנד מהותי 30% — בן/בת זוג', key: 'special_rate.field_212', inputKey: 'dividend_significant_30_spouse' },
-    ],
-  },
-  {
-    id: 'interest_dep_15',
-    partId: 'ה',
-    title: 'סעיף 21 — ריבית פיקדונות/חסכונות — 15%',
-    fields: [
-      { code: '078', label: 'ריבית פיקדונות 15% — נישום', key: 'special_rate.field_078', inputKey: 'interest_deposits_15_taxpayer' },
-      { code: '217', label: 'ריבית פיקדונות 15% — בן/בת זוג', key: 'special_rate.field_217', inputKey: 'interest_deposits_15_spouse' },
-    ],
-  },
-  {
-    id: 'interest_dep_20',
-    partId: 'ה',
-    title: 'סעיף 22 — ריבית פיקדונות/חסכונות — 20%',
-    fields: [
-      { code: '126', label: 'ריבית פיקדונות 20% — נישום', key: 'special_rate.field_126', inputKey: 'interest_deposits_20_taxpayer' },
-      { code: '226', label: 'ריבית פיקדונות 20% — בן/בת זוג', key: 'special_rate.field_226', inputKey: 'interest_deposits_20_spouse' },
-    ],
-  },
-  {
-    id: 'interest_dep_25',
-    partId: 'ה',
-    title: 'סעיף 23 — ריבית פיקדונות/חסכונות — 25%',
-    fields: [
-      { code: '142', label: 'ריבית פיקדונות 25% — נישום', key: 'special_rate.field_142', source: 'טופס 867', inputKey: 'interest_deposits_25_taxpayer' },
-      { code: '242', label: 'ריבית פיקדונות 25% — בן/בת זוג', key: 'special_rate.field_242', inputKey: 'interest_deposits_25_spouse' },
-    ],
-  },
-  {
-    id: 'rental_10',
-    partId: 'ה',
-    title: 'סעיף 24 — שכ"ד למגורים — מסלול 10%',
-    fields: [
-      { code: '222', label: 'שכ"ד למגורים 10% — נישום', key: 'special_rate.field_222', source: 'קובץ Excel', inputKey: 'rental_10_taxpayer' },
-      { code: '284', label: 'שכ"ד למגורים 10% — בן/בת זוג', key: 'special_rate.field_284', inputKey: 'rental_10_spouse' },
-    ],
-  },
-  {
-    id: 'rental_abroad',
-    partId: 'ה',
-    title: 'סעיף 25 — שכ"ד מחו"ל — 15%',
-    fields: [
-      { code: '225', label: 'שכ"ד מחו"ל 15% — נישום', key: 'special_rate.field_225', inputKey: 'rental_abroad_15_taxpayer' },
-      { code: '285', label: 'שכ"ד מחו"ל 15% — בן/בת זוג', key: 'special_rate.field_285', inputKey: 'rental_abroad_15_spouse' },
-    ],
-  },
-  {
-    id: 'gambling',
-    partId: 'ה',
-    title: 'סעיף 26 — הימורים, הגרלות, פרסים — 35%',
-    fields: [
-      { code: '227', label: 'הימורים/הגרלות 35% — נישום', key: 'special_rate.field_227', inputKey: 'gambling_35_taxpayer' },
-      { code: '286', label: 'הימורים/הגרלות 35% — בן/בת זוג', key: 'special_rate.field_286', inputKey: 'gambling_35_spouse' },
-    ],
-  },
-  {
-    id: 'renewable',
-    partId: 'ה',
-    title: 'סעיף 27 — אנרגיות מתחדשות — 31%',
-    fields: [
-      { code: '335', label: 'אנרגיות מתחדשות 31% — נישום', key: 'special_rate.field_335', inputKey: 'renewable_energy_31_taxpayer' },
-      { code: '337', label: 'אנרגיות מתחדשות 31% — בן/בת זוג', key: 'special_rate.field_337', inputKey: 'renewable_energy_31_spouse' },
-    ],
-  },
-  {
-    id: 'pension_dist',
-    partId: 'ה',
-    title: 'סעיף 28 — חלוקה לחיסכון פנסיוני — 20%',
-    fields: [
-      { code: '288', label: 'חלוקה לפנסיה 20% — נישום', key: 'special_rate.field_288', inputKey: 'pension_distribution_20_taxpayer' },
-      { code: '338', label: 'חלוקה לפנסיה 20% — בן/בת זוג', key: 'special_rate.field_338', inputKey: 'pension_distribution_20_spouse' },
-    ],
-  },
-  {
-    id: 'unauthorized',
-    partId: 'ה',
-    title: 'סעיף 29 — משיכה שלא כדין מקופ"ג — 35%',
-    fields: [
-      { code: '213', label: 'משיכה שלא כדין 35% — נישום', key: 'special_rate.field_213', inputKey: 'unauthorized_withdrawal_35_taxpayer' },
-      { code: '313', label: 'משיכה שלא כדין 35% — בן/בת זוג', key: 'special_rate.field_313', inputKey: 'unauthorized_withdrawal_35_spouse' },
-    ],
-  },
-  // === חלק ח — רווח הון ===
-  {
-    id: 'capital_gains',
-    partId: 'ח',
-    title: 'חלק ח — רווח הון',
-    description: 'מכירת מניות, RSU, ESPP, קריפטו',
-    fields: [
-      { code: '139', label: 'רווח הון 25%', key: 'capital_gains.field_139', inputKey: 'capital_gains' },
-    ],
-  },
-  {
-    id: 'crypto',
-    partId: 'ח',
-    title: 'הכנסות מקריפטו',
-    description: 'רווח ממכירת מטבעות דיגיטליים — מדווח כרווח הון (שדה 139)',
-    fields: [
-      { code: '139*', label: 'רווח הון מקריפטו', key: '_crypto', inputKey: 'crypto_income' },
-    ],
-  },
-  // === חלק י — הכנסות פטורות ===
-  {
-    id: 'exempt_disability',
-    partId: 'י',
-    title: 'סעיף 41 — פטור נכות 9(5)',
-    fields: [
-      { code: '109', label: 'פטור נכות — נישום', key: 'exempt.field_109', inputKey: 'exempt_disability_taxpayer' },
-      { code: '309', label: 'פטור נכות — בן/בת זוג', key: 'exempt.field_309', inputKey: 'exempt_disability_spouse' },
-    ],
-  },
-  {
-    id: 'exempt_rental',
-    partId: 'י',
-    title: 'סעיף 42 — שכ"ד פטור',
-    description: 'שכ"ד פטור ממס עד התקרה',
-    fields: [
-      { code: '332', label: 'שכ"ד פטור ממס', key: 'exempt.field_332', inputKey: 'exempt_rental_income' },
-    ],
-  },
-  // === חלק יב — ניכויים אישיים ===
-  {
-    id: 'disability_ins_self',
-    partId: 'יב',
-    title: 'סעיף 49 — ביטוח אבדן כושר עבודה (עצמאי)',
-    fields: [
-      { code: '112', label: 'אבדן כושר עצמאי — נישום', key: 'deductions.field_112', inputKey: 'disability_insurance_self_taxpayer' },
-      { code: '113', label: 'אבדן כושר עצמאי — בן/בת זוג', key: 'deductions.field_113', inputKey: 'disability_insurance_self_spouse' },
-    ],
-  },
-  {
-    id: 'disability_ins_emp',
-    partId: 'יב',
-    title: 'סעיף 50 — ביטוח אבדן כושר עבודה (שכיר)',
-    fields: [
-      { code: '206', label: 'אבדן כושר שכיר — נישום', key: 'deductions.field_206', inputKey: 'disability_insurance_employee_taxpayer' },
-      { code: '207', label: 'אבדן כושר שכיר — בן/בת זוג', key: 'deductions.field_207', inputKey: 'disability_insurance_employee_spouse' },
-    ],
-  },
-  {
-    id: 'education_fund_self',
-    partId: 'יב',
-    title: 'סעיף 51 — קרן השתלמות לעצמאי',
-    fields: [
-      { code: '136', label: 'קרן השתלמות עצמאי — נישום', key: 'deductions.field_136', inputKey: 'education_fund_self_taxpayer' },
-      { code: '137', label: 'קרן השתלמות עצמאי — בן/בת זוג', key: 'deductions.field_137', inputKey: 'education_fund_self_spouse' },
-    ],
-  },
-  {
-    id: 'education_fund_emp',
-    partId: 'יב',
-    title: 'סעיף 52 — משכורת לקרן השתלמות',
-    fields: [
-      { code: '218', label: 'קרן השתלמות שכיר — נישום', key: 'deductions.field_218', source: 'טופס 106' },
-      { code: '219', label: 'קרן השתלמות שכיר — בן/בת זוג', key: 'deductions.field_219', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'pension_self',
-    partId: 'יב',
-    title: 'סעיף 53 — קופ"ג כעמית עצמאי',
-    fields: [
-      { code: '135', label: 'קופ"ג עצמאי — נישום', key: 'deductions.field_135', inputKey: 'pension_self_taxpayer' },
-      { code: '180', label: 'קופ"ג עצמאי — בן/בת זוג', key: 'deductions.field_180', inputKey: 'pension_self_spouse' },
-    ],
-  },
-  {
-    id: 'nii_non_work',
-    partId: 'יב',
-    title: 'סעיף 54 — ביט"ל על הכנסה שאינה עבודה',
-    fields: [
-      { code: '030', label: 'ביט"ל לא-עבודה — נישום', key: 'deductions.field_030', inputKey: 'nii_non_employment_taxpayer' },
-      { code: '089', label: 'ביט"ל לא-עבודה — בן/בת זוג', key: 'deductions.field_089', inputKey: 'nii_non_employment_spouse' },
-    ],
-  },
-  {
-    id: 'insured_income',
-    partId: 'יב',
-    title: 'סעיף 58 — הכנסה מבוטחת',
-    fields: [
-      { code: '244', label: 'הכנסה מבוטחת — נישום', key: 'deductions.field_244', source: 'טופס 106' },
-      { code: '245', label: 'הכנסה מבוטחת — בן/בת זוג', key: 'deductions.field_245', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'pension_employer',
-    partId: 'יב',
-    title: 'סעיף 59 — הפקדות מעביד לקופות גמל',
-    fields: [
-      { code: '248', label: 'הפקדות מעביד — נישום', key: 'deductions.field_248', source: 'טופס 106' },
-      { code: '249', label: 'הפקדות מעביד — בן/בת זוג', key: 'deductions.field_249', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'convalescence',
-    partId: 'יב',
-    title: 'סעיף 60 — הפחתת דמי הבראה',
-    fields: [
-      { code: '011', label: 'דמי הבראה — נישום', key: 'deductions.field_011', source: 'טופס 106' },
-      { code: '012', label: 'דמי הבראה — בן/בת זוג', key: 'deductions.field_012', source: 'טופס 106' },
-    ],
-  },
-  // === חלק יג — נקודות זיכוי ===
-  {
-    id: 'credit_points',
-    partId: 'יג',
-    title: 'סעיפים 61-72 — נקודות זיכוי',
-    description: 'תושב, ילדים, תואר, שחרור מצבא, הורה חד-הורי',
-    fields: [
-      { code: '020', label: 'נקודות זיכוי — נישום', key: 'credit_points.credit_points_taxpayer', inputKey: 'credit_points_taxpayer' },
-      { code: '021', label: 'נקודות זיכוי — בן/בת זוג', key: 'credit_points.credit_points_spouse', inputKey: 'credit_points_spouse' },
-      { code: '260', label: 'נקודות ילדים — נישום', key: 'credit_points.field_260', inputKey: 'children_credit_points_taxpayer' },
-      { code: '262', label: 'נקודות ילדים — בן/בת זוג', key: 'credit_points.field_262', inputKey: 'children_credit_points_spouse' },
-      { code: '026', label: 'הורה חד-הורי', key: 'credit_points.field_026', inputKey: 'single_parent_points' },
-    ],
-  },
-  // === חלק יד — זיכויים ===
-  {
-    id: 'life_insurance',
-    partId: 'יד',
-    title: 'סעיף 73 — ביטוח חיים',
-    description: 'ביטוח חיים (כולל משכנתא) — זיכוי 25%',
-    fields: [
-      { code: '036', label: 'ביטוח חיים — נישום', key: 'tax_credits.field_036', inputKey: 'life_insurance_taxpayer' },
-      { code: '081', label: 'ביטוח חיים — בן/בת זוג', key: 'tax_credits.field_081', inputKey: 'life_insurance_spouse' },
-    ],
-  },
-  {
-    id: 'survivors_insurance',
-    partId: 'יד',
-    title: 'סעיף 74 — ביטוח קצבת שאירים',
-    fields: [
-      { code: '140', label: 'שאירים — נישום', key: 'tax_credits.field_140', inputKey: 'survivors_insurance_taxpayer' },
-      { code: '240', label: 'שאירים — בן/בת זוג', key: 'tax_credits.field_240', inputKey: 'survivors_insurance_spouse' },
-    ],
-  },
-  {
-    id: 'pension_employee_credit',
-    partId: 'יד',
-    title: 'סעיף 75 — קצבה כעמית שכיר',
-    description: 'הפרשות עובד לפנסיה — זיכוי 35%',
-    fields: [
-      { code: '045', label: 'עמית שכיר — נישום', key: 'tax_credits.field_045', source: 'טופס 106' },
-      { code: '086', label: 'עמית שכיר — בן/בת זוג', key: 'tax_credits.field_086', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'pension_self_credit',
-    partId: 'יד',
-    title: 'סעיף 76 — קצבה כעמית עצמאי',
-    fields: [
-      { code: '268', label: 'עמית עצמאי — נישום', key: 'tax_credits.field_268', inputKey: 'pension_self_credit_taxpayer' },
-      { code: '269', label: 'עמית עצמאי — בן/בת זוג', key: 'tax_credits.field_269', inputKey: 'pension_self_credit_spouse' },
-    ],
-  },
-  {
-    id: 'institution_care',
-    partId: 'יד',
-    title: 'סעיף 77 — החזקת בן משפחה במוסד',
-    fields: [
-      { code: '132', label: 'מוסד — נישום', key: 'tax_credits.field_132', inputKey: 'institution_care_taxpayer' },
-      { code: '232', label: 'מוסד — בן/בת זוג', key: 'tax_credits.field_232', inputKey: 'institution_care_spouse' },
-    ],
-  },
-  {
-    id: 'donations',
-    partId: 'יד',
-    title: 'סעיף 78 — תרומות למוסדות מוכרים',
-    description: 'זיכוי 35%',
-    fields: [
-      { code: '037', label: 'תרומות ישראל — נישום', key: 'tax_credits.field_037', source: 'טופס 106', inputKey: 'donation_taxpayer' },
-      { code: '237', label: 'תרומות ישראל — בן/בת זוג', key: 'tax_credits.field_237', inputKey: 'donation_spouse' },
-      { code: '046', label: 'תרומות ארה"ב — נישום', key: 'tax_credits.field_046', inputKey: 'donation_us_taxpayer' },
-      { code: '048', label: 'תרומות ארה"ב — בן/בת זוג', key: 'tax_credits.field_048', inputKey: 'donation_us_spouse' },
-    ],
-  },
-  {
-    id: 'rnd',
-    partId: 'יד',
-    title: 'סעיף 80 — השקעות במחקר ופיתוח',
-    fields: [
-      { code: '155', label: 'מו"פ — נישום', key: 'tax_credits.field_155', inputKey: 'rnd_investment_taxpayer' },
-      { code: '199', label: 'מו"פ — בן/בת זוג', key: 'tax_credits.field_199', inputKey: 'rnd_investment_spouse' },
-    ],
-  },
-  {
-    id: 'eilat',
-    partId: 'יד',
-    title: 'סעיף 81 — תושב אילת/אזור פיתוח',
-    fields: [
-      { code: '183', label: 'הכנסה מזכה — אילת', key: 'tax_credits.field_183', inputKey: 'eilat_income_taxpayer' },
-    ],
-  },
-  // === חלק טו — ניכויים במקור ===
-  {
-    id: 'tax_withheld_salary',
-    partId: 'טו',
-    title: 'סעיף 84 — מס שנוכה ממשכורת',
-    fields: [
-      { code: '042', label: 'מס שנוכה ממשכורת', key: 'withholdings.field_042', source: 'טופס 106' },
-    ],
-  },
-  {
-    id: 'tax_withheld_interest',
-    partId: 'טו',
-    title: 'סעיף 85 — ניכוי במקור מריבית ודיבידנד',
-    fields: [
-      { code: '043', label: 'מס שנוכה מריבית/דיבידנד', key: 'withholdings.field_043', source: 'טופס 867' },
-    ],
-  },
-  {
-    id: 'tax_withheld_other',
-    partId: 'טו',
-    title: 'סעיף 87 — ניכוי מס מהכנסות אחרות',
-    fields: [
-      { code: '040', label: 'מס שנוכה מהכנסות אחרות', key: 'withholdings.field_040', inputKey: 'withholding_other' },
-    ],
-  },
-  {
-    id: 'land_tax',
-    partId: 'טו',
-    title: 'סעיף 88 — מס שבח',
-    fields: [
-      { code: '041', label: 'מס שבח', key: 'withholdings.field_041', inputKey: 'land_appreciation_tax' },
-    ],
-  },
-  {
-    id: 'tax_advance',
-    partId: 'טו',
-    title: 'מקדמות מס שכירות ודוח שנתי',
-    fields: [
-      { code: '220', label: 'מס שכירות ששולם', key: 'withholdings.field_220', source: 'אישור תשלום', inputKey: 'rental_tax_paid' },
-      { code: '---', label: 'מקדמות מדוח שנתי (ESOP)', key: 'withholdings.field_tax_advance', source: 'דוח שנתי' },
+    title: 'נתונים עסקיים והוצאות מיוחדות',
+    rows: [
+      { code: '150', label: 'הנני בעל שליטה בחבר בני אדם אשר סכום מסוים ממנו מדווח בטופס 150', explanation: 'מסמנים כן אם אתה בעל שליטה בחברה ויש לך חובת דיווח רלוונטית בטופס 150. אחרת משאירים לא.', type: 'radio' },
+      { code: '034', label: 'הפקת תיעוד פנים / הוצאות הפקת הכנסה', explanation: 'שדה זה מתייחס להוצאות הקשורות ליצירת ההכנסה, למשל שכ"ט רו"ח או הוצאות מקצועיות. אם אין הוצאות כאלה, בחר לא.', type: 'radio' },
+      { code: '307', label: 'הכנסות פטורות / אנרגיות מתחדשות / פעילות באינטרנט', explanation: 'זהו סעיף הצהרתי למצבים מיוחדים. אם לא הייתה לך פעילות כזו, אל תסמן.', type: 'checkbox' },
     ],
   },
 ]
 
+const DOC_TYPE_LABELS: Record<string, string> = {
+  form_106: 'טופס 106',
+  form_867: 'טופס 867',
+  rental_payment: 'אישור תשלום שכירות',
+  annual_summary: 'דוח שנתי מניות',
+  receipt: 'קבלה/חשבונית',
+  rental_excel: 'Excel שכירות',
+  unknown: 'לא מזוהה',
+}
+
+function formatNIS(amount: number): string {
+  return new Intl.NumberFormat('he-IL', {
+    style: 'currency', currency: 'ILS', maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+// --- IRS form data structure ---
+
+interface CellDef {
+  code: string
+  resultKey: string
+  inputKey?: string
+  source?: string
+  placeholder?: string
+  step?: string
+}
+
+interface IRSRow {
+  num: number
+  description: string
+  notes?: string[]
+  taxpayer?: CellDef
+  spouse?: CellDef
+}
+
+interface IRSSection {
+  partId: string
+  title: string
+  rows: IRSRow[]
+}
+
+type AdvisorItem = {
+  id: string
+  title: string
+  detail: string
+  level: 'info' | 'warn' | 'missing'
+}
+
+type SavedDraft = {
+  activeTab: FormTab
+  personalForm: Record<string, string>
+  generalForm: Record<string, string>
+  inputs: Record<string, string>
+  savedAt: string
+}
+
+const IRS_SECTIONS: IRSSection[] = [
+  // ===== ג — הכנסות חייבות בשיעורי מס רגילים =====
+  {
+    partId: 'ג',
+    title: 'ג. הכנסות חייבות בשיעורי מס רגילים',
+    rows: [
+      {
+        num: 1, description: 'הכנסה מעסק או משלח יד',
+        taxpayer: { code: '150', resultKey: 'income.field_150', inputKey: 'business_income_taxpayer' },
+        spouse: { code: '170', resultKey: 'income.field_170', inputKey: 'business_income_spouse' },
+      },
+      {
+        num: 2, description: 'תקבולי ביטוח לאומי — עצמאי',
+        taxpayer: { code: '250', resultKey: 'income.field_250', inputKey: 'nii_self_employed_taxpayer' },
+        spouse: { code: '270', resultKey: 'income.field_270', inputKey: 'nii_self_employed_spouse' },
+      },
+      {
+        num: 3, description: 'תקבולי ביטוח לאומי — שכיר',
+        taxpayer: { code: '194', resultKey: 'income.field_194', inputKey: 'nii_employee_taxpayer' },
+        spouse: { code: '196', resultKey: 'income.field_196', inputKey: 'nii_employee_spouse' },
+      },
+      {
+        num: 4, description: 'הכנסה ממשכורת',
+        taxpayer: { code: '158', resultKey: 'income.field_158', source: 'טופס 106' },
+        spouse: { code: '172', resultKey: 'income.field_172', source: 'טופס 106' },
+      },
+      {
+        num: 5, description: 'עבודה במשמרות',
+        taxpayer: { code: '069', resultKey: 'income.field_069', inputKey: 'shift_work_taxpayer' },
+        spouse: { code: '068', resultKey: 'income.field_068', inputKey: 'shift_work_spouse' },
+      },
+      {
+        num: 6, description: 'מענקי פרישה וקצבאות',
+        taxpayer: { code: '258', resultKey: 'income.field_258', inputKey: 'retirement_grants_taxpayer' },
+        spouse: { code: '272', resultKey: 'income.field_272', inputKey: 'retirement_grants_spouse' },
+      },
+      {
+        num: 7, description: 'השתכרות מביטוח אבטלה / מילואים / דמי לידה',
+        taxpayer: { code: '120', resultKey: '_unemployment_tp', inputKey: 'unemployment_benefits_taxpayer' },
+        spouse: { code: '220', resultKey: '_unemployment_sp', inputKey: 'unemployment_benefits_spouse' },
+      },
+      {
+        num: 8,
+        description: 'הכנסות אחרות מיגיעה אישית בארץ',
+        notes: ['לרבות הכנסה שאינה ממשכורת או שכר עבודה רגיל'],
+        taxpayer: { code: '007', resultKey: '_other_personal_tp', inputKey: 'other_personal_income_taxpayer' },
+        spouse: { code: '013', resultKey: '_other_personal_sp', inputKey: 'other_personal_income_spouse' },
+      },
+    ],
+  },
+  // ===== ד — הכנסות אחרות בשיעורי מס רגילים =====
+  {
+    partId: 'ד',
+    title: 'ד. הכנסות אחרות בשיעורי מס רגילים',
+    rows: [
+      {
+        num: 7, description: 'הכנסה מנכס בית',
+        taxpayer: { code: '059', resultKey: 'other_income.field_059', inputKey: 'real_estate_income_taxpayer' },
+        spouse: { code: '201', resultKey: 'other_income.field_201', inputKey: 'real_estate_income_spouse' },
+      },
+      {
+        num: 10, description: 'הכנסות מהשכרת מקרקעין שאינן למגורים',
+        taxpayer: { code: '150', resultKey: '_non_residential_rent_tp', inputKey: 'non_residential_rent_taxpayer' },
+        spouse: { code: '301', resultKey: '_non_residential_rent_sp', inputKey: 'non_residential_rent_spouse' },
+      },
+      {
+        num: 11, description: 'תמורות / הכנסות אחרות מנכסי מקרקעין',
+        taxpayer: { code: '367', resultKey: '_property_other_tp', inputKey: 'property_other_income_taxpayer' },
+        spouse: { code: '202', resultKey: '_property_other_sp', inputKey: 'property_other_income_spouse' },
+      },
+      {
+        num: 12, description: 'הכנסות אחרות — משותף',
+        taxpayer: { code: '167', resultKey: 'other_income.field_167', inputKey: 'other_income_joint' },
+      },
+      {
+        num: 13, description: 'הכנסות אחרות',
+        taxpayer: { code: '305', resultKey: 'other_income.field_305', inputKey: 'other_income_taxpayer' },
+        spouse: { code: '205', resultKey: 'other_income.field_205', inputKey: 'other_income_spouse' },
+      },
+    ],
+  },
+  // ===== ה — הכנסות חייבות בשיעורי מס מיוחדים =====
+  {
+    partId: 'ה',
+    title: 'ה. הכנסות חייבות בשיעורי מס מיוחדים',
+    rows: [
+      {
+        num: 10, description: 'ריבית ניירות ערך, דיבידנד מפעל מאושר — 15%',
+        taxpayer: { code: '060', resultKey: 'special_rate.field_060', inputKey: 'interest_securities_15_taxpayer' },
+        spouse: { code: '211', resultKey: 'special_rate.field_211', inputKey: 'interest_securities_15_spouse' },
+      },
+      {
+        num: 11, description: 'ריבית ניירות ערך, קופות גמל — 20%',
+        taxpayer: { code: '067', resultKey: 'special_rate.field_067', inputKey: 'interest_securities_20_taxpayer' },
+        spouse: { code: '228', resultKey: 'special_rate.field_228', inputKey: 'interest_securities_20_spouse' },
+      },
+      {
+        num: 12, description: 'ריבית ניירות ערך, קופות גמל — 25%',
+        taxpayer: { code: '157', resultKey: 'special_rate.field_157', inputKey: 'interest_securities_25_taxpayer' },
+        spouse: { code: '257', resultKey: 'special_rate.field_257', inputKey: 'interest_securities_25_spouse' },
+      },
+      {
+        num: 13, description: 'דיבידנד מפעל מועדף/מאושר — 20%',
+        taxpayer: { code: '173', resultKey: 'special_rate.field_173', inputKey: 'dividend_preferred_20_taxpayer' },
+        spouse: { code: '275', resultKey: 'special_rate.field_275', inputKey: 'dividend_preferred_20_spouse' },
+      },
+      {
+        num: 14, description: 'דיבידנד — 25%',
+        taxpayer: { code: '141', resultKey: 'special_rate.field_141', inputKey: 'dividend_25_taxpayer', source: 'טופס 867', placeholder: 'אוטומטי מ-867' },
+        spouse: { code: '241', resultKey: 'special_rate.field_241', inputKey: 'dividend_25_spouse' },
+      },
+      {
+        num: 15, description: 'דיבידנד בעל מניות מהותי — 30%',
+        taxpayer: { code: '055', resultKey: 'special_rate.field_055', inputKey: 'dividend_significant_30_taxpayer' },
+        spouse: { code: '212', resultKey: 'special_rate.field_212', inputKey: 'dividend_significant_30_spouse' },
+      },
+      {
+        num: 16, description: 'ריבית על פיקדונות/חסכונות — 15%',
+        taxpayer: { code: '078', resultKey: 'special_rate.field_078', inputKey: 'interest_deposits_15_taxpayer' },
+        spouse: { code: '217', resultKey: 'special_rate.field_217', inputKey: 'interest_deposits_15_spouse' },
+      },
+      {
+        num: 17, description: 'ריבית על פיקדונות/חסכונות — 20%',
+        taxpayer: { code: '126', resultKey: 'special_rate.field_126', inputKey: 'interest_deposits_20_taxpayer' },
+        spouse: { code: '226', resultKey: 'special_rate.field_226', inputKey: 'interest_deposits_20_spouse' },
+      },
+      {
+        num: 18, description: 'ריבית על פיקדונות/חסכונות — 25%',
+        taxpayer: { code: '142', resultKey: 'special_rate.field_142', inputKey: 'interest_deposits_25_taxpayer', source: 'טופס 867', placeholder: 'אוטומטי מ-867' },
+        spouse: { code: '242', resultKey: 'special_rate.field_242', inputKey: 'interest_deposits_25_spouse' },
+      },
+      {
+        num: 19, description: 'הכנסת שכר דירה למגורים — 10%',
+        taxpayer: { code: '222', resultKey: 'special_rate.field_222', inputKey: 'rental_10_taxpayer', source: 'Excel', placeholder: 'אוטומטי מ-Excel' },
+        spouse: { code: '284', resultKey: 'special_rate.field_284', inputKey: 'rental_10_spouse' },
+      },
+      {
+        num: 20, description: 'שכר דירה מחוץ לארץ — 15%',
+        taxpayer: { code: '225', resultKey: 'special_rate.field_225', inputKey: 'rental_abroad_15_taxpayer' },
+        spouse: { code: '285', resultKey: 'special_rate.field_285', inputKey: 'rental_abroad_15_spouse' },
+      },
+      {
+        num: 21, description: 'הימורים, הגרלות, פרסים — 35%',
+        taxpayer: { code: '227', resultKey: 'special_rate.field_227', inputKey: 'gambling_35_taxpayer' },
+        spouse: { code: '286', resultKey: 'special_rate.field_286', inputKey: 'gambling_35_spouse' },
+      },
+      {
+        num: 22, description: 'הכנסות מאנרגיות מתחדשות — 31%',
+        taxpayer: { code: '335', resultKey: 'special_rate.field_335', inputKey: 'renewable_energy_31_taxpayer' },
+        spouse: { code: '337', resultKey: 'special_rate.field_337', inputKey: 'renewable_energy_31_spouse' },
+      },
+      {
+        num: 23, description: 'חלוקה מחיסכון פנסיוני — 20%',
+        taxpayer: { code: '288', resultKey: 'special_rate.field_288', inputKey: 'pension_distribution_20_taxpayer' },
+        spouse: { code: '338', resultKey: 'special_rate.field_338', inputKey: 'pension_distribution_20_spouse' },
+      },
+      {
+        num: 24, description: 'משיכה שלא כדין מקופת גמל — 35%',
+        taxpayer: { code: '213', resultKey: 'special_rate.field_213', inputKey: 'unauthorized_withdrawal_35_taxpayer' },
+        spouse: { code: '313', resultKey: 'special_rate.field_313', inputKey: 'unauthorized_withdrawal_35_spouse' },
+      },
+    ],
+  },
+  // ===== ח — רווחי הון =====
+  {
+    partId: 'ח',
+    title: 'ח. רווחי הון',
+    rows: [
+      {
+        num: 25, description: 'רווח הון ריאלי — מניות, RSU, ESPP',
+        taxpayer: { code: '139', resultKey: 'capital_gains.field_139', inputKey: 'capital_gains' },
+      },
+      {
+        num: 26, description: 'רווח הון — מטבעות דיגיטליים (קריפטו)',
+        taxpayer: { code: '139', resultKey: '_crypto', inputKey: 'crypto_income' },
+      },
+      {
+        num: 32,
+        description: 'הפסד הון להעברה לשנים הבאות',
+        notes: ['לאחר התאמת הסכום המופיע בשדה 150/170 או בשומות קודמות'],
+        taxpayer: { code: '032', resultKey: '_capital_loss_tp', inputKey: 'capital_loss_carryforward_taxpayer' },
+        spouse: { code: '163', resultKey: '_capital_loss_sp', inputKey: 'capital_loss_carryforward_spouse' },
+      },
+    ],
+  },
+  // ===== י — הכנסות פטורות =====
+  {
+    partId: 'י',
+    title: 'י. הכנסות פטורות ממס',
+    rows: [
+      {
+        num: 27, description: 'פטור נכות — סעיף 9(5)',
+        taxpayer: { code: '109', resultKey: 'exempt.field_109', inputKey: 'exempt_disability_taxpayer' },
+        spouse: { code: '309', resultKey: 'exempt.field_309', inputKey: 'exempt_disability_spouse' },
+      },
+      {
+        num: 28, description: 'שכר דירה פטור ממס',
+        taxpayer: { code: '332', resultKey: 'exempt.field_332', inputKey: 'exempt_rental_income' },
+      },
+      {
+        num: 33,
+        description: 'הכנסה פטורה ממכירת נכס / קצבה פטורה',
+        taxpayer: { code: '184', resultKey: '_exempt_misc_tp', inputKey: 'exempt_misc_taxpayer' },
+        spouse: { code: '185', resultKey: '_exempt_misc_sp', inputKey: 'exempt_misc_spouse' },
+      },
+      {
+        num: 34,
+        description: 'רווחים / הכנסות פטורות מעסק או משלח יד',
+        taxpayer: { code: '186', resultKey: '_exempt_business_tp', inputKey: 'exempt_business_taxpayer' },
+        spouse: { code: '187', resultKey: '_exempt_business_sp', inputKey: 'exempt_business_spouse' },
+      },
+      {
+        num: 35,
+        description: 'הכנסה פטורה אחרת',
+        taxpayer: { code: '238', resultKey: '_exempt_other_tp', inputKey: 'exempt_other_taxpayer' },
+        spouse: { code: '239', resultKey: '_exempt_other_sp', inputKey: 'exempt_other_spouse' },
+      },
+    ],
+  },
+  {
+    partId: 'יא',
+    title: 'יא. הכנסות חו"ל והכנסות מיוחדות',
+    rows: [
+      {
+        num: 36,
+        description: 'מס רווח הון / שבח שנפרס',
+        taxpayer: { code: '054', resultKey: '_foreign_spread_gain', inputKey: 'spread_gain_taxpayer' },
+      },
+      {
+        num: 37,
+        description: 'סכום הכנסות פטורות ממקור חוץ',
+        taxpayer: { code: '056', resultKey: '_foreign_exempt_income', inputKey: 'foreign_exempt_income_taxpayer' },
+      },
+      {
+        num: 38,
+        description: 'סכום מס הכנסה מחו"ל / מס שנוכה בחו"ל',
+        taxpayer: { code: '256', resultKey: '_foreign_tax_paid', inputKey: 'foreign_tax_paid_taxpayer' },
+      },
+      {
+        num: 39,
+        description: 'סך הכנסות חו"ל נוספות',
+        taxpayer: { code: '290', resultKey: '_foreign_income_total', inputKey: 'foreign_income_total_taxpayer' },
+      },
+    ],
+  },
+  // ===== יב — ניכויים אישיים =====
+  {
+    partId: 'יב',
+    title: 'יב. ניכויים אישיים',
+    rows: [
+      {
+        num: 29, description: 'ביטוח אבדן כושר עבודה — עצמאי',
+        taxpayer: { code: '112', resultKey: 'deductions.field_112', inputKey: 'disability_insurance_self_taxpayer' },
+        spouse: { code: '113', resultKey: 'deductions.field_113', inputKey: 'disability_insurance_self_spouse' },
+      },
+      {
+        num: 30, description: 'ביטוח אבדן כושר עבודה — שכיר',
+        taxpayer: { code: '206', resultKey: 'deductions.field_206', inputKey: 'disability_insurance_employee_taxpayer' },
+        spouse: { code: '207', resultKey: 'deductions.field_207', inputKey: 'disability_insurance_employee_spouse' },
+      },
+      {
+        num: 31, description: 'קרן השתלמות — עצמאי',
+        taxpayer: { code: '136', resultKey: 'deductions.field_136', inputKey: 'education_fund_self_taxpayer' },
+        spouse: { code: '137', resultKey: 'deductions.field_137', inputKey: 'education_fund_self_spouse' },
+      },
+      {
+        num: 32, description: 'משכורת לקרן השתלמות — שכיר',
+        taxpayer: { code: '218', resultKey: 'deductions.field_218', source: 'טופס 106' },
+        spouse: { code: '219', resultKey: 'deductions.field_219', source: 'טופס 106' },
+      },
+      {
+        num: 33, description: 'הפקדה לקופת גמל — עמית עצמאי',
+        taxpayer: { code: '135', resultKey: 'deductions.field_135', inputKey: 'pension_self_taxpayer' },
+        spouse: { code: '180', resultKey: 'deductions.field_180', inputKey: 'pension_self_spouse' },
+      },
+      {
+        num: 34, description: 'ביטוח לאומי על הכנסה שאינה מעבודה',
+        taxpayer: { code: '030', resultKey: 'deductions.field_030', inputKey: 'nii_non_employment_taxpayer' },
+        spouse: { code: '089', resultKey: 'deductions.field_089', inputKey: 'nii_non_employment_spouse' },
+      },
+      {
+        num: 35, description: 'הכנסה מבוטחת',
+        taxpayer: { code: '244', resultKey: 'deductions.field_244', source: 'טופס 106' },
+        spouse: { code: '245', resultKey: 'deductions.field_245', source: 'טופס 106' },
+      },
+      {
+        num: 36, description: 'הפקדות מעביד לקופות גמל',
+        taxpayer: { code: '248', resultKey: 'deductions.field_248', source: 'טופס 106' },
+        spouse: { code: '249', resultKey: 'deductions.field_249', source: 'טופס 106' },
+      },
+      {
+        num: 37, description: 'הפחתת דמי הבראה',
+        taxpayer: { code: '011', resultKey: 'deductions.field_011', source: 'טופס 106' },
+        spouse: { code: '012', resultKey: 'deductions.field_012', source: 'טופס 106' },
+      },
+    ],
+  },
+  // ===== יג — נקודות זיכוי =====
+  {
+    partId: 'יג',
+    title: 'יג. נקודות זיכוי',
+    rows: [
+      {
+        num: 38, description: 'נקודות זיכוי',
+        taxpayer: { code: '020', resultKey: 'credit_points.credit_points_taxpayer', inputKey: 'credit_points_taxpayer', placeholder: 'אוטו׳ 2.25', step: '0.25' },
+        spouse: { code: '021', resultKey: 'credit_points.credit_points_spouse', inputKey: 'credit_points_spouse', placeholder: 'אוטו׳ 2.75', step: '0.25' },
+      },
+      {
+        num: 39, description: 'נקודות זיכוי בגין ילדים',
+        taxpayer: { code: '260', resultKey: 'credit_points.field_260', inputKey: 'children_credit_points_taxpayer', step: '0.5' },
+        spouse: { code: '262', resultKey: 'credit_points.field_262', inputKey: 'children_credit_points_spouse', step: '0.5' },
+      },
+      {
+        num: 40, description: 'הורה חד-הורי',
+        taxpayer: { code: '026', resultKey: 'credit_points.field_026', inputKey: 'single_parent_points', step: '0.5' },
+      },
+    ],
+  },
+  // ===== יד — זיכויים מהמס =====
+  {
+    partId: 'יד',
+    title: 'יד. זיכויים מהמס',
+    rows: [
+      {
+        num: 41, description: 'ביטוח חיים — זיכוי 25%',
+        taxpayer: { code: '036', resultKey: 'tax_credits.field_036', inputKey: 'life_insurance_taxpayer' },
+        spouse: { code: '081', resultKey: 'tax_credits.field_081', inputKey: 'life_insurance_spouse' },
+      },
+      {
+        num: 42, description: 'ביטוח קצבת שאירים',
+        taxpayer: { code: '140', resultKey: 'tax_credits.field_140', inputKey: 'survivors_insurance_taxpayer' },
+        spouse: { code: '240', resultKey: 'tax_credits.field_240', inputKey: 'survivors_insurance_spouse' },
+      },
+      {
+        num: 43, description: 'הפרשות עובד לפנסיה — זיכוי 35%',
+        taxpayer: { code: '045', resultKey: 'tax_credits.field_045', source: 'טופס 106' },
+        spouse: { code: '086', resultKey: 'tax_credits.field_086', source: 'טופס 106' },
+      },
+      {
+        num: 44, description: 'קצבה כעמית עצמאי',
+        taxpayer: { code: '268', resultKey: 'tax_credits.field_268', inputKey: 'pension_self_credit_taxpayer' },
+        spouse: { code: '269', resultKey: 'tax_credits.field_269', inputKey: 'pension_self_credit_spouse' },
+      },
+      {
+        num: 45, description: 'החזקת בן משפחה במוסד',
+        taxpayer: { code: '132', resultKey: 'tax_credits.field_132', inputKey: 'institution_care_taxpayer' },
+        spouse: { code: '232', resultKey: 'tax_credits.field_232', inputKey: 'institution_care_spouse' },
+      },
+      {
+        num: 46, description: 'תרומות למוסדות מוכרים — 35%',
+        taxpayer: { code: '037', resultKey: 'tax_credits.field_037', inputKey: 'donation_taxpayer', source: 'טופס 106', placeholder: 'אוטומטי מ-106' },
+        spouse: { code: '237', resultKey: 'tax_credits.field_237', inputKey: 'donation_spouse' },
+      },
+      {
+        num: 47, description: 'תרומות למוסדות מוכרים — ארה"ב',
+        taxpayer: { code: '046', resultKey: 'tax_credits.field_046', inputKey: 'donation_us_taxpayer' },
+        spouse: { code: '048', resultKey: 'tax_credits.field_048', inputKey: 'donation_us_spouse' },
+      },
+      {
+        num: 48, description: 'השקעות במחקר ופיתוח',
+        taxpayer: { code: '155', resultKey: 'tax_credits.field_155', inputKey: 'rnd_investment_taxpayer' },
+        spouse: { code: '199', resultKey: 'tax_credits.field_199', inputKey: 'rnd_investment_spouse' },
+      },
+      {
+        num: 49, description: 'תושב אילת/אזור פיתוח',
+        taxpayer: { code: '183', resultKey: 'tax_credits.field_183', inputKey: 'eilat_income_taxpayer' },
+      },
+    ],
+  },
+  // ===== טו — ניכויים במקור ותשלומים =====
+  {
+    partId: 'טו',
+    title: 'טו. ניכויים במקור ותשלומים',
+    rows: [
+      {
+        num: 50, description: 'מס שנוכה ממשכורת',
+        taxpayer: { code: '042', resultKey: 'withholdings.field_042', source: 'טופס 106' },
+      },
+      {
+        num: 51, description: 'ניכוי במקור — ריבית ודיבידנד',
+        taxpayer: { code: '043', resultKey: 'withholdings.field_043', source: 'טופס 867' },
+      },
+      {
+        num: 52, description: 'ניכוי מס מהכנסות אחרות',
+        taxpayer: { code: '040', resultKey: 'withholdings.field_040', inputKey: 'withholding_other' },
+      },
+      {
+        num: 53, description: 'מס שבח',
+        taxpayer: { code: '041', resultKey: 'withholdings.field_041', inputKey: 'land_appreciation_tax' },
+      },
+      {
+        num: 54, description: 'מס שכירות ששולם',
+        taxpayer: { code: '220', resultKey: 'withholdings.field_220', inputKey: 'rental_tax_paid', source: 'אישור תשלום', placeholder: 'אוטומטי מאישור' },
+      },
+      {
+        num: 55, description: 'מקדמות מדוח שנתי',
+        taxpayer: { code: '---', resultKey: 'withholdings.field_tax_advance', source: 'דוח שנתי' },
+      },
+    ],
+  },
+  // ===== נתונים נוספים =====
+  {
+    partId: 'נוסף',
+    title: 'נתונים נוספים',
+    rows: [
+      {
+        num: 56, description: 'הוצאות הפקת הכנסה',
+        taxpayer: { code: '034', resultKey: '_production_tp', inputKey: 'production_expenses_taxpayer', placeholder: 'למשל 1,170' },
+        spouse: { code: '034', resultKey: '_production_sp', inputKey: 'production_expenses_spouse' },
+      },
+      {
+        num: 57, description: 'הפרשי הצמדה וריבית',
+        taxpayer: { code: '---', resultKey: '_cpi', inputKey: 'interest_cpi_adjustment', placeholder: 'מתוך השומה' },
+      },
+    ],
+  },
+]
+
+// --- helpers ---
+
 function getFieldValue(result: Form1301Result, path: string): number {
-  if (path.startsWith('_')) return 0 // virtual fields (crypto, solar, etc.)
+  if (path.startsWith('_')) return 0
   const parts = path.split('.')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let obj: any = result
@@ -525,158 +624,429 @@ function getFieldValue(result: Form1301Result, path: string): number {
   return typeof obj === 'number' ? obj : 0
 }
 
+function getCheckedGroupValues(form: Record<string, string>, key: string): string[] {
+  const rawValue = form[key]
+  if (!rawValue) return []
+  return rawValue.split('|').filter(Boolean)
+}
+
+function hasIdSupplementValue(doc: DocumentInfo | undefined, field: string): boolean {
+  return Boolean(doc?.extracted?.[field]?.value)
+}
+
+function countExtractedValues(doc: DocumentInfo): number {
+  return Object.values(doc.extracted || {}).reduce((count, field) => {
+    return field?.value === null || field?.value === '' ? count : count + 1
+  }, 0)
+}
+
+function pickPreferredDocument(documents: DocumentInfo[], documentType: string): DocumentInfo | undefined {
+  return documents
+    .filter((doc) => doc.document_type === documentType)
+    .sort((left, right) => {
+      if (left.user_corrected !== right.user_corrected) {
+        return left.user_corrected ? -1 : 1
+      }
+      return countExtractedValues(right) - countExtractedValues(left)
+    })[0]
+}
+
+function normalizeSupplementDate(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
+  const dotMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+  if (dotMatch) {
+    return `${dotMatch[3]}-${dotMatch[2]}-${dotMatch[1]}`
+  }
+  const slashMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (slashMatch) {
+    return `${slashMatch[3]}-${slashMatch[2]}-${slashMatch[1]}`
+  }
+  return ''
+}
+
+function isNumericFieldCode(code: string): boolean {
+  return /^\d+$/.test(code)
+}
+
+function buildFieldAssistantQuestion(row: GeneralRow): string {
+  return `הסבר לי בפשטות מה המשמעות של השדה "${row.label}", מתי בדרך כלל מסמנים כן או לא, ומה כדאי לבדוק לפני שממלאים אותו.`
+}
+
+function getDraftStorageKey(taxYear: number): string {
+  return `form1301-draft-${taxYear}`
+}
+
+function buildAdvisorItems(params: {
+  documents: DocumentInfo[]
+  result: Form1301Result | null
+  maritalStatus: string
+  inputs: Record<string, string>
+}): AdvisorItem[] {
+  const { documents, result, maritalStatus, inputs } = params
+  const items: AdvisorItem[] = []
+  const docTypes = new Set(documents.map((doc) => doc.document_type))
+  const preferredIdSupplement = pickPreferredDocument(documents, 'id_supplement')
+  const hasSpouseContext = maritalStatus === 'נשוי' || Boolean(preferredIdSupplement?.extracted?.spouse_id?.value)
+
+  if (documents.length === 0) {
+    items.push({
+      id: 'missing-all-docs',
+      title: 'לא הועלו מסמכים לשנת המס',
+      detail: 'כדאי להעלות לפחות טופס 106, ספח תעודת זהות ומסמכי השקעות או שכירות אם קיימים, כדי לצמצם הזנה ידנית ושגיאות.',
+      level: 'missing',
+    })
+    return items
+  }
+
+  if (!docTypes.has('id_supplement')) {
+    items.push({
+      id: 'missing-id-supplement',
+      title: 'חסר ספח תעודת זהות',
+      detail: 'בלי הספח קשה להשלים אוטומטית בן או בת זוג, ילדים ונקודות זיכוי משפחתיות.',
+      level: 'missing',
+    })
+  }
+
+  if (!docTypes.has('form_106')) {
+    items.push({
+      id: 'missing-106',
+      title: 'לא נמצא טופס 106',
+      detail: 'אם הייתה הכנסה ממשכורת, זה בדרך כלל המסמך הראשון שצריך להעלות כדי לאכלס שכר, מס שנוכה, פנסיה ותרומות.',
+      level: 'missing',
+    })
+  }
+
+  if (hasSpouseContext && documents.filter((doc) => doc.document_type === 'form_106').length === 1) {
+    items.push({
+      id: 'check-spouse-106',
+      title: 'נמצא רק טופס 106 אחד במשק בית זוגי',
+      detail: 'אם גם לבן או לבת הזוג הייתה משכורת, כדאי להעלות גם את טופס 106 שלהם כדי להימנע מייחוס חלקי של הכנסות.',
+      level: 'warn',
+    })
+  }
+
+  if ((result?.special_rate.field_222 ?? 0) > 0 && !docTypes.has('rental_excel') && !docTypes.has('rental_payment')) {
+    items.push({
+      id: 'check-rent-docs',
+      title: 'יש הכנסות משכירות במסלול 10% בלי מסמכי גיבוי',
+      detail: 'כדאי להעלות קובץ שכירות או אישורי תשלום מס כדי לאמת את סכום ההכנסה ואת המס שכבר שולם.',
+      level: 'warn',
+    })
+  }
+
+  if (((result?.special_rate.field_141 ?? 0) > 0 || (result?.special_rate.field_142 ?? 0) > 0) && !docTypes.has('form_867') && !docTypes.has('annual_summary')) {
+    items.push({
+      id: 'missing-investment-docs',
+      title: 'יש הכנסות הון ללא מסמך השקעות תומך',
+      detail: 'כשיש דיבידנד או ריבית, רצוי להעלות טופס 867 או דוח שנתי מתאים כדי לאמת את ההכנסה והניכוי במקור.',
+      level: 'missing',
+    })
+  }
+
+  if ((Number(inputs.production_expenses_taxpayer || '0') > 0 || Number(inputs.production_expenses_spouse || '0') > 0) && !docTypes.has('receipt')) {
+    items.push({
+      id: 'missing-receipts',
+      title: 'הוזנו הוצאות הפקת הכנסה ללא קבלות',
+      detail: 'אם אתה מסתמך על שכ"ט רו"ח או הוצאות אחרות, כדאי להעלות קבלות כדי לשמור תיעוד תומך.',
+      level: 'warn',
+    })
+  }
+
+  if ((result?.credit_points.field_260 ?? 0) > 0 || (result?.credit_points.field_262 ?? 0) > 0) {
+    items.push({
+      id: 'children-points-check',
+      title: 'נקודות זיכוי ילדים חושבו אוטומטית',
+      detail: 'כדאי לעבור על שיוך הילדים בין בני הזוג ולוודא שהוא תואם לשומה בפועל, במיוחד בשנים עם שינויי חקיקה.',
+      level: 'info',
+    })
+  }
+
+  for (const [index, warning] of (result?.warnings ?? []).entries()) {
+    items.push({
+      id: `warning-${index}`,
+      title: 'נדרשת בדיקה ידנית',
+      detail: warning,
+      level: 'warn',
+    })
+  }
+
+  if (items.length === 0) {
+    items.push({
+      id: 'all-good',
+      title: 'לא נמצאו כרגע פערי מסמכים ברורים',
+      detail: 'החישוב מבוסס על המסמכים והנתונים הקיימים. עדיין מומלץ להשוות מול השומה או הדוח שהוגש בפועל.',
+      level: 'info',
+    })
+  }
+
+  return items
+}
+
+// --- component ---
+
 export function Form1301Page() {
   const { taxYear } = useTaxYear()
+  const [activeTab, setActiveTab] = useState<FormTab>('income')
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Form1301PreviewResponse | null>(null)
   const [error, setError] = useState('')
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  const [tabValidationErrors, setTabValidationErrors] = useState<string[]>([])
+  const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set())
+  const [fieldHelp, setFieldHelp] = useState<FieldHelpResponse | null>(null)
+  const [fieldHelpOpen, setFieldHelpOpen] = useState(false)
+  const [fieldHelpLoading, setFieldHelpLoading] = useState(false)
+  const [draftStatus, setDraftStatus] = useState<'idle' | 'saved' | 'restored' | 'error'>('idle')
+  const [draftSavedAt, setDraftSavedAt] = useState('')
+  const resultRef = useRef<HTMLDivElement>(null)
+  const chatRef = useRef<FloatingChatHandle>(null)
+  const [personalForm, setPersonalForm] = useState<Record<string, string>>({})
+  const [generalForm, setGeneralForm] = useState<Record<string, string>>({})
 
-  // Manual input fields
+  const loadDocuments = useCallback(async () => {
+    try {
+      const data = await api<DocumentListResponse>('/documents')
+      setDocuments(data.documents)
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const [inputs, setInputs] = useState<Record<string, string>>({
-    // חלק ג
-    business_income_taxpayer: '',
-    business_income_spouse: '',
-    nii_self_employed_taxpayer: '',
-    nii_self_employed_spouse: '',
-    nii_employee_taxpayer: '',
-    nii_employee_spouse: '',
-    shift_work_taxpayer: '',
-    shift_work_spouse: '',
-    retirement_grants_taxpayer: '',
-    retirement_grants_spouse: '',
-    // חלק ד
-    real_estate_income_taxpayer: '',
-    real_estate_income_spouse: '',
-    other_income_taxpayer: '',
-    other_income_spouse: '',
-    other_income_joint: '',
-    // חלק ה
-    interest_securities_15_taxpayer: '',
-    interest_securities_15_spouse: '',
-    interest_securities_20_taxpayer: '',
-    interest_securities_20_spouse: '',
-    interest_securities_25_taxpayer: '',
-    interest_securities_25_spouse: '',
-    dividend_preferred_20_taxpayer: '',
-    dividend_preferred_20_spouse: '',
-    dividend_25_taxpayer: '',
-    dividend_25_spouse: '',
-    dividend_significant_30_taxpayer: '',
-    dividend_significant_30_spouse: '',
-    interest_deposits_15_taxpayer: '',
-    interest_deposits_15_spouse: '',
-    interest_deposits_20_taxpayer: '',
-    interest_deposits_20_spouse: '',
-    interest_deposits_25_taxpayer: '',
-    interest_deposits_25_spouse: '',
-    rental_10_taxpayer: '',
-    rental_10_spouse: '',
-    rental_abroad_15_taxpayer: '',
-    rental_abroad_15_spouse: '',
-    gambling_35_taxpayer: '',
-    gambling_35_spouse: '',
-    renewable_energy_31_taxpayer: '',
-    renewable_energy_31_spouse: '',
-    pension_distribution_20_taxpayer: '',
-    pension_distribution_20_spouse: '',
-    unauthorized_withdrawal_35_taxpayer: '',
-    unauthorized_withdrawal_35_spouse: '',
-    // חלק ח
-    capital_gains: '',
-    crypto_income: '',
-    // חלק י
-    exempt_rental_income: '',
-    exempt_disability_taxpayer: '',
-    exempt_disability_spouse: '',
-    // חלק יב
-    disability_insurance_self_taxpayer: '',
-    disability_insurance_self_spouse: '',
-    disability_insurance_employee_taxpayer: '',
-    disability_insurance_employee_spouse: '',
-    education_fund_self_taxpayer: '',
-    education_fund_self_spouse: '',
-    pension_self_taxpayer: '',
-    pension_self_spouse: '',
-    nii_non_employment_taxpayer: '',
-    nii_non_employment_spouse: '',
-    // חלק יג
-    credit_points_taxpayer: '',
-    credit_points_spouse: '',
-    children_credit_points_taxpayer: '',
-    children_credit_points_spouse: '',
+    // ג
+    business_income_taxpayer: '', business_income_spouse: '',
+    nii_self_employed_taxpayer: '', nii_self_employed_spouse: '',
+    nii_employee_taxpayer: '', nii_employee_spouse: '',
+    shift_work_taxpayer: '', shift_work_spouse: '',
+    retirement_grants_taxpayer: '', retirement_grants_spouse: '',
+    unemployment_benefits_taxpayer: '', unemployment_benefits_spouse: '',
+    other_personal_income_taxpayer: '', other_personal_income_spouse: '',
+    // ד
+    real_estate_income_taxpayer: '', real_estate_income_spouse: '',
+    non_residential_rent_taxpayer: '', non_residential_rent_spouse: '',
+    property_other_income_taxpayer: '', property_other_income_spouse: '',
+    other_income_taxpayer: '', other_income_spouse: '', other_income_joint: '',
+    // ה
+    interest_securities_15_taxpayer: '', interest_securities_15_spouse: '',
+    interest_securities_20_taxpayer: '', interest_securities_20_spouse: '',
+    interest_securities_25_taxpayer: '', interest_securities_25_spouse: '',
+    dividend_preferred_20_taxpayer: '', dividend_preferred_20_spouse: '',
+    dividend_25_taxpayer: '', dividend_25_spouse: '',
+    dividend_significant_30_taxpayer: '', dividend_significant_30_spouse: '',
+    interest_deposits_15_taxpayer: '', interest_deposits_15_spouse: '',
+    interest_deposits_20_taxpayer: '', interest_deposits_20_spouse: '',
+    interest_deposits_25_taxpayer: '', interest_deposits_25_spouse: '',
+    rental_10_taxpayer: '', rental_10_spouse: '',
+    rental_abroad_15_taxpayer: '', rental_abroad_15_spouse: '',
+    gambling_35_taxpayer: '', gambling_35_spouse: '',
+    renewable_energy_31_taxpayer: '', renewable_energy_31_spouse: '',
+    pension_distribution_20_taxpayer: '', pension_distribution_20_spouse: '',
+    unauthorized_withdrawal_35_taxpayer: '', unauthorized_withdrawal_35_spouse: '',
+    // ח
+    capital_gains: '', crypto_income: '',
+    capital_loss_carryforward_taxpayer: '', capital_loss_carryforward_spouse: '',
+    // י
+    exempt_rental_income: '', exempt_disability_taxpayer: '', exempt_disability_spouse: '',
+    exempt_misc_taxpayer: '', exempt_misc_spouse: '',
+    exempt_business_taxpayer: '', exempt_business_spouse: '',
+    exempt_other_taxpayer: '', exempt_other_spouse: '',
+    spread_gain_taxpayer: '', foreign_exempt_income_taxpayer: '', foreign_tax_paid_taxpayer: '', foreign_income_total_taxpayer: '',
+    // יב
+    disability_insurance_self_taxpayer: '', disability_insurance_self_spouse: '',
+    disability_insurance_employee_taxpayer: '', disability_insurance_employee_spouse: '',
+    education_fund_self_taxpayer: '', education_fund_self_spouse: '',
+    pension_self_taxpayer: '', pension_self_spouse: '',
+    nii_non_employment_taxpayer: '', nii_non_employment_spouse: '',
+    // יג
+    credit_points_taxpayer: '', credit_points_spouse: '',
+    children_credit_points_taxpayer: '', children_credit_points_spouse: '',
     single_parent_points: '',
-    // חלק יד
-    life_insurance_taxpayer: '',
-    life_insurance_spouse: '',
-    survivors_insurance_taxpayer: '',
-    survivors_insurance_spouse: '',
-    pension_self_credit_taxpayer: '',
-    pension_self_credit_spouse: '',
-    institution_care_taxpayer: '',
-    institution_care_spouse: '',
-    donation_taxpayer: '',
-    donation_spouse: '',
-    donation_us_taxpayer: '',
-    donation_us_spouse: '',
-    rnd_investment_taxpayer: '',
-    rnd_investment_spouse: '',
+    // יד
+    life_insurance_taxpayer: '', life_insurance_spouse: '',
+    survivors_insurance_taxpayer: '', survivors_insurance_spouse: '',
+    pension_self_credit_taxpayer: '', pension_self_credit_spouse: '',
+    institution_care_taxpayer: '', institution_care_spouse: '',
+    donation_taxpayer: '', donation_spouse: '',
+    donation_us_taxpayer: '', donation_us_spouse: '',
+    rnd_investment_taxpayer: '', rnd_investment_spouse: '',
     eilat_income_taxpayer: '',
-    // חלק טו
-    rental_tax_paid: '',
-    withholding_other: '',
-    land_appreciation_tax: '',
-    // הוצאות הפקת הכנסה
-    production_expenses_taxpayer: '',
-    production_expenses_spouse: '',
-    // הפרשי הצמדה וריבית
+    // טו
+    rental_tax_paid: '', withholding_other: '', land_appreciation_tax: '',
+    // נוסף
+    production_expenses_taxpayer: '', production_expenses_spouse: '',
     interest_cpi_adjustment: '',
   })
 
-  // Load documents
+  const saveDraft = useCallback(() => {
+    try {
+      const savedAt = new Date().toISOString()
+      const draft: SavedDraft = {
+        activeTab,
+        personalForm,
+        generalForm,
+        inputs,
+        savedAt,
+      }
+      window.localStorage.setItem(getDraftStorageKey(taxYear), JSON.stringify(draft))
+      setDraftStatus('saved')
+      setDraftSavedAt(savedAt)
+    } catch {
+      setDraftStatus('error')
+    }
+  }, [activeTab, generalForm, inputs, personalForm, taxYear])
+
   useEffect(() => {
-    api<DocumentListResponse>('/documents')
-      .then((data) => setDocuments(data.documents))
-      .catch(() => {})
+    void loadDocuments()
     setResult(null)
+  }, [loadDocuments, taxYear])
+
+  useEffect(() => {
+    try {
+      const rawDraft = window.localStorage.getItem(getDraftStorageKey(taxYear))
+      if (!rawDraft) {
+        setDraftStatus('idle')
+        setDraftSavedAt('')
+        return
+      }
+      const draft = JSON.parse(rawDraft) as Partial<SavedDraft>
+      if (draft.activeTab === 'personal' || draft.activeTab === 'general' || draft.activeTab === 'income') {
+        setActiveTab(draft.activeTab)
+      }
+      if (draft.personalForm && typeof draft.personalForm === 'object') {
+        setPersonalForm(draft.personalForm)
+      }
+      if (draft.generalForm && typeof draft.generalForm === 'object') {
+        setGeneralForm(draft.generalForm)
+      }
+      if (draft.inputs && typeof draft.inputs === 'object') {
+        setInputs((prev) => ({ ...prev, ...draft.inputs }))
+      }
+      setDraftStatus('restored')
+      setDraftSavedAt(typeof draft.savedAt === 'string' ? draft.savedAt : '')
+    } catch {
+      setDraftStatus('error')
+    }
   }, [taxYear])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      saveDraft()
+    }, 400)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [saveDraft])
+
+  useEffect(() => {
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        void loadDocuments()
+      }
+    }
+
+    const handleFocusRefresh = () => {
+      void loadDocuments()
+    }
+
+    window.addEventListener('focus', handleFocusRefresh)
+    document.addEventListener('visibilitychange', handleVisibilityRefresh)
+
+    return () => {
+      window.removeEventListener('focus', handleFocusRefresh)
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh)
+    }
+  }, [loadDocuments])
 
   const handleInputChange = (field: string, value: string) => {
     setInputs((prev) => ({ ...prev, [field]: value }))
-  }
-
-  const toggleSection = (id: string) => {
-    setExpandedSections((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
+    setAutoFilled((prev) => {
+      if (prev.has(field)) {
+        const next = new Set(prev)
+        next.delete(field)
+        return next
+      }
+      return prev
     })
   }
+
+  const openFieldHelp = useCallback(async (code: string) => {
+    if (!code || code === '---') return
+    setFieldHelpLoading(true)
+    setFieldHelpOpen(true)
+    try {
+      const data = await api<FieldHelpResponse>(`/form-1301/field-help/${code}`)
+      setFieldHelp(data)
+    } catch {
+      setFieldHelp({
+        code,
+        title: `שדה ${code}`,
+        description: 'עדיין אין הסבר זמין לשדה זה.',
+        part_id: '',
+        part_name_he: '',
+        section_num: null,
+        section_name_he: '',
+        guide_line: null,
+        tax_rate: '',
+        notes: [],
+      })
+    } finally {
+      setFieldHelpLoading(false)
+    }
+  }, [])
+
+  const maritalStatus = personalForm.marital_status ?? ''
+  const hasJointIncomeSource = generalForm['331'] === 'yes'
+  const spouseAssistsIncome = generalForm['spouse_report_mode'] === 'yes' && generalForm['spouse_report_mode_detail'] === 'assisted_income'
+  const taxpayerImmigrantStatus = generalForm['273'] ?? ''
+  const taxpayerImmigrantArrivalDate = generalForm['273_date'] ?? ''
+  const spouseImmigrantStatus = generalForm['274'] ?? ''
+  const spouseImmigrantArrivalDate = generalForm['274_date'] ?? ''
 
   const handleCalculate = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const params = new URLSearchParams({ year: String(taxYear) })
+      if (maritalStatus) {
+        params.set('marital_status', maritalStatus)
+      }
+      if (hasJointIncomeSource) params.set('has_joint_income_source', 'true')
+      if (spouseAssistsIncome) params.set('spouse_assists_income', 'true')
+      if (taxpayerImmigrantStatus) params.set('immigrant_taxpayer_status', taxpayerImmigrantStatus)
+      if (taxpayerImmigrantArrivalDate) params.set('immigrant_taxpayer_arrival_date', taxpayerImmigrantArrivalDate)
+      if (spouseImmigrantStatus) params.set('immigrant_spouse_status', spouseImmigrantStatus)
+      if (spouseImmigrantArrivalDate) params.set('immigrant_spouse_arrival_date', spouseImmigrantArrivalDate)
       for (const [key, val] of Object.entries(inputs)) {
         if (val) params.set(key, val)
       }
       const data = await api<Form1301PreviewResponse>(`/form-1301/preview?${params}`)
       setResult(data)
-      // Expand all sections after calculation
-      setExpandedSections(new Set(FORM_SECTIONS.map((s) => s.id)))
+      const eff = data.result.effective_inputs
+      if (eff && Object.keys(eff).length > 0) {
+        const filled = new Set<string>()
+        setInputs((prev) => {
+          const updated = { ...prev }
+          for (const [field, val] of Object.entries(eff)) {
+            if (!updated[field] || updated[field] === '') {
+              updated[field] = String(val)
+              filled.add(field)
+            }
+          }
+          return updated
+        })
+        setAutoFilled(filled)
+      }
+      setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'שגיאה בחישוב')
     } finally {
       setLoading(false)
     }
-  }, [taxYear, inputs])
+  }, [taxYear, inputs, maritalStatus, hasJointIncomeSource, spouseAssistsIncome, taxpayerImmigrantStatus, taxpayerImmigrantArrivalDate, spouseImmigrantStatus, spouseImmigrantArrivalDate])
 
   const yearDocs = documents.filter((d) => {
-    const ext = d.extracted
-    const docYear = ext?.tax_year?.value
+    const docYear = d.extracted?.tax_year?.value
     return !docYear || Number(docYear) === taxYear
   })
 
@@ -688,242 +1058,800 @@ export function Form1301Page() {
   }, {})
 
   const r = result?.result
+  const advisorItems = buildAdvisorItems({
+    documents: yearDocs,
+    result: r ?? null,
+    maritalStatus,
+    inputs,
+  })
+  const idSupplement = pickPreferredDocument(yearDocs, 'id_supplement')
   const interestAdj = r?.calculation.interest_cpi_adjustment ?? 0
   const balance = interestAdj !== 0
     ? (r?.calculation.balance_after_interest ?? 0)
     : (r?.calculation.balance ?? 0)
 
-  // Group sections by part
-  const partGroups: { partId: string; title: string; sections: FormSectionDef[] }[] = [
-    { partId: 'ג', title: 'חלק ג — הכנסות מיגיעה אישית', sections: [] },
-    { partId: 'ד', title: 'חלק ד — הכנסות בשיעורי מס רגילים', sections: [] },
-    { partId: 'ה', title: 'חלק ה — הכנסות בשיעורי מס מיוחדים', sections: [] },
-    { partId: 'ח', title: 'חלק ח — רווח הון', sections: [] },
-    { partId: 'י', title: 'חלק י — הכנסות פטורות', sections: [] },
-    { partId: 'יב', title: 'חלק יב — ניכויים אישיים', sections: [] },
-    { partId: 'יג', title: 'חלק יג — נקודות זיכוי', sections: [] },
-    { partId: 'יד', title: 'חלק יד — זיכויים מהמס', sections: [] },
-    { partId: 'טו', title: 'חלק טו — ניכויים במקור ותשלומים', sections: [] },
-  ]
-  for (const section of FORM_SECTIONS) {
-    const group = partGroups.find((g) => g.partId === section.partId)
-    if (group) group.sections.push(section)
+  const chatSnapshot: FormSnapshot = {
+    taxYear,
+    activeTab,
+    personalForm,
+    generalForm,
+    inputs,
+    sourceDocuments: r?.source_documents ?? yearDocs.map((d) => d.original_filename),
+    warnings: r?.warnings ?? [],
+    balance,
+    netTax: r?.calculation.net_tax ?? 0,
   }
 
-  return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">מדריך מילוי טופס 1301 — שנת {taxYear}</h1>
-      </div>
-
-      {/* Uploaded documents summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            מסמכים שהועלו ({yearDocs.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {yearDocs.length === 0 ? (
-            <p className="text-muted-foreground">
-              לא הועלו מסמכים לשנת {taxYear}. עבור ל
-              <a href="/documents" className="text-primary underline mx-1">דף המסמכים</a>
-              כדי להעלות טפסים.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(docsByType).map(([type, docs]) => (
-                <div key={type} className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-sm">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                  <span>{DOC_TYPE_LABELS[type] || type}</span>
-                  <span className="text-muted-foreground">({docs.length})</span>
-                </div>
-              ))}
-            </div>
+  const renderCell = (cell: CellDef) => {
+    if (cell.inputKey) {
+      return (
+        <input
+          type="number"
+          className={cn(
+            'w-full h-7 px-1.5 text-sm border rounded-sm text-left tabular-nums',
+            autoFilled.has(cell.inputKey)
+              ? 'bg-green-50 border-green-400'
+              : 'bg-white border-gray-300',
           )}
-        </CardContent>
-      </Card>
+          dir="ltr"
+          value={inputs[cell.inputKey]}
+          placeholder={cell.placeholder || ''}
+          step={cell.step || '1'}
+          onChange={(e) => handleInputChange(cell.inputKey!, e.target.value)}
+        />
+      )
+    }
+    if (r) {
+      const val = getFieldValue(r, cell.resultKey)
+      if (val > 0) {
+        return (
+          <span className="text-sm tabular-nums font-medium text-green-800 block text-left" dir="ltr">
+            {formatNIS(val)}
+          </span>
+        )
+      }
+    }
+    return <span className="text-[10px] text-gray-400 block truncate">{cell.source || ''}</span>
+  }
 
-      {/* Additional income questionnaire */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <PenLine className="h-5 w-5" />
-            הכנסות נוספות ונתונים ידניים
-          </CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            מלא כאן הכנסות שלא נמצאות במסמכים שהועלו. שדות ריקים = 0 או אוטומטי מהמסמכים.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-4">
-            מלא כאן הכנסות שלא נמצאות במסמכים שהועלו. שדות ריקים = 0 או אוטומטי.
-            השדות מאורגנים לפי חלקי טופס 1301.
-          </p>
-          <div className="space-y-4">
-            {/* חלק ג — הכנסות מיגיעה אישית */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1">חלק ג — הכנסות מיגיעה אישית</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="הכנסה מעסק — נישום (150)" id="business_income_taxpayer" value={inputs.business_income_taxpayer} onChange={handleInputChange} />
-              <InputField label="הכנסה מעסק — בן/בת זוג (170)" id="business_income_spouse" value={inputs.business_income_spouse} onChange={handleInputChange} />
-              <InputField label={'ביט"ל עצמאי — נישום (250)'} id="nii_self_employed_taxpayer" value={inputs.nii_self_employed_taxpayer} onChange={handleInputChange} />
-              <InputField label={'ביט"ל עצמאי — בן/בת זוג (270)'} id="nii_self_employed_spouse" value={inputs.nii_self_employed_spouse} onChange={handleInputChange} />
-              <InputField label={'ביט"ל שכיר — נישום (194)'} id="nii_employee_taxpayer" value={inputs.nii_employee_taxpayer} onChange={handleInputChange} />
-              <InputField label={'ביט"ל שכיר — בן/בת זוג (196)'} id="nii_employee_spouse" value={inputs.nii_employee_spouse} onChange={handleInputChange} />
-              <InputField label="משמרות — נישום (069)" id="shift_work_taxpayer" value={inputs.shift_work_taxpayer} onChange={handleInputChange} />
-              <InputField label="משמרות — בן/בת זוג (068)" id="shift_work_spouse" value={inputs.shift_work_spouse} onChange={handleInputChange} />
-              <InputField label="מענקי פרישה/קצבאות — נישום (258)" id="retirement_grants_taxpayer" value={inputs.retirement_grants_taxpayer} onChange={handleInputChange} />
-              <InputField label="מענקי פרישה/קצבאות — בן/בת זוג (272)" id="retirement_grants_spouse" value={inputs.retirement_grants_spouse} onChange={handleInputChange} />
-            </div>
+  const renderFieldCodeButton = (code?: string) => {
+    if (!code) return null
+    if (code === '---') {
+      return <span className="text-gray-300">---</span>
+    }
+    return (
+      <button
+        type="button"
+        className="rounded px-1 py-0.5 font-mono text-[11px] font-bold text-[#1a3a5c] underline decoration-dotted underline-offset-2 hover:bg-[#eef4fb]"
+        onClick={() => void openFieldHelp(code)}
+      >
+        {code}
+      </button>
+    )
+  }
 
-            {/* חלק ד */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק ד — הכנסות בשיעורי מס רגילים</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="נכס בית — נישום (059)" id="real_estate_income_taxpayer" value={inputs.real_estate_income_taxpayer} onChange={handleInputChange} />
-              <InputField label="נכס בית — בן/בת זוג (201)" id="real_estate_income_spouse" value={inputs.real_estate_income_spouse} onChange={handleInputChange} />
-              <InputField label="הכנסות אחרות — משותף (167)" id="other_income_joint" value={inputs.other_income_joint} onChange={handleInputChange} />
-              <InputField label="הכנסות אחרות — נישום (305)" id="other_income_taxpayer" value={inputs.other_income_taxpayer} onChange={handleInputChange} />
-              <InputField label="הכנסות אחרות — בן/בת זוג (205)" id="other_income_spouse" value={inputs.other_income_spouse} onChange={handleInputChange} />
-            </div>
+  const renderDraftActions = () => {
+    const savedLabel = draftSavedAt
+      ? new Date(draftSavedAt).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })
+      : ''
 
-            {/* חלק ה — שיעורי מס מיוחדים */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק ה — הכנסות בשיעורי מס מיוחדים</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="דיבידנד 25% — נישום (141)" id="dividend_25_taxpayer" value={inputs.dividend_25_taxpayer} onChange={handleInputChange} placeholder="אוטומטי מ-867" />
-              <InputField label="דיבידנד 25% — בן/בת זוג (241)" id="dividend_25_spouse" value={inputs.dividend_25_spouse} onChange={handleInputChange} />
-              <InputField label="ריבית פיקדונות 25% — נישום (142)" id="interest_deposits_25_taxpayer" value={inputs.interest_deposits_25_taxpayer} onChange={handleInputChange} placeholder="אוטומטי מ-867" />
-              <InputField label="ריבית פיקדונות 25% — בן/בת זוג (242)" id="interest_deposits_25_spouse" value={inputs.interest_deposits_25_spouse} onChange={handleInputChange} />
-              <InputField label="דיבידנד מהותי 30% — נישום (055)" id="dividend_significant_30_taxpayer" value={inputs.dividend_significant_30_taxpayer} onChange={handleInputChange} />
-              <InputField label="דיבידנד מהותי 30% — בן/בת זוג (212)" id="dividend_significant_30_spouse" value={inputs.dividend_significant_30_spouse} onChange={handleInputChange} />
-              <InputField label={'שכ"ד למגורים 10% — נישום (222)'} id="rental_10_taxpayer" value={inputs.rental_10_taxpayer} onChange={handleInputChange} placeholder="אוטומטי מ-Excel" />
-              <InputField label={'שכ"ד למגורים 10% — בן/בת זוג (284)'} id="rental_10_spouse" value={inputs.rental_10_spouse} onChange={handleInputChange} />
-              <InputField label={'שכ"ד מחו"ל 15% — נישום (225)'} id="rental_abroad_15_taxpayer" value={inputs.rental_abroad_15_taxpayer} onChange={handleInputChange} />
-              <InputField label={'שכ"ד מחו"ל 15% — בן/בת זוג (285)'} id="rental_abroad_15_spouse" value={inputs.rental_abroad_15_spouse} onChange={handleInputChange} />
-              <InputField label="הימורים/הגרלות 35% — נישום (227)" id="gambling_35_taxpayer" value={inputs.gambling_35_taxpayer} onChange={handleInputChange} />
-              <InputField label="הימורים/הגרלות 35% — בן/בת זוג (286)" id="gambling_35_spouse" value={inputs.gambling_35_spouse} onChange={handleInputChange} />
-              <InputField label="אנרגיות מתחדשות 31% — נישום (335)" id="renewable_energy_31_taxpayer" value={inputs.renewable_energy_31_taxpayer} onChange={handleInputChange} />
-              <InputField label="אנרגיות מתחדשות 31% — בן/בת זוג (337)" id="renewable_energy_31_spouse" value={inputs.renewable_energy_31_spouse} onChange={handleInputChange} />
-            </div>
+    return (
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-[#cfe0f0] bg-[#f7fbff] px-3 py-2 text-sm text-[#23496d]">
+        <button
+          type="button"
+          onClick={saveDraft}
+          className="inline-flex items-center gap-2 rounded bg-[#2f658d] px-4 py-1 text-sm text-white"
+        >
+          <Save className="h-4 w-4" />
+          שמירה
+        </button>
+        {draftStatus === 'saved' ? <span>הטיוטה נשמרה{savedLabel ? `: ${savedLabel}` : ''}</span> : null}
+        {draftStatus === 'restored' ? <span>הטיוטה האחרונה שוחזרה{savedLabel ? `: ${savedLabel}` : ''}</span> : null}
+        {draftStatus === 'error' ? <span className="text-red-700">שמירת הטיוטה נכשלה בדפדפן הזה</span> : null}
+      </div>
+    )
+  }
 
-            {/* חלק ח — רווח הון */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק ח — רווח הון</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="רווח הון — מניות/RSU (139)" id="capital_gains" value={inputs.capital_gains} onChange={handleInputChange} />
-              <InputField label="רווח הון — קריפטו (→ 139)" id="crypto_income" value={inputs.crypto_income} onChange={handleInputChange} />
-            </div>
+  const renderGeneralCodeBadge = (row: GeneralRow) => {
+    if (isNumericFieldCode(row.code)) {
+      return renderFieldCodeButton(row.code)
+    }
+    return (
+      <span className="rounded bg-[#eef4fb] px-2 py-0.5 text-[11px] font-bold text-[#23496d]">
+        {row.displayCode || 'מידע'}
+      </span>
+    )
+  }
 
-            {/* חלק י — פטורות */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק י — הכנסות פטורות</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label={'שכ"ד פטור ממס (332)'} id="exempt_rental_income" value={inputs.exempt_rental_income} onChange={handleInputChange} />
-              <InputField label="פטור נכות — נישום (109)" id="exempt_disability_taxpayer" value={inputs.exempt_disability_taxpayer} onChange={handleInputChange} />
-              <InputField label="פטור נכות — בן/בת זוג (309)" id="exempt_disability_spouse" value={inputs.exempt_disability_spouse} onChange={handleInputChange} />
-            </div>
+  const nextTab = () => {
+    setTabValidationErrors([])
+    setError('')
+    setActiveTab((prev) => {
+      if (prev === 'personal') return 'general'
+      if (prev === 'general') return 'income'
+      return 'income'
+    })
+  }
 
-            {/* חלק יב — ניכויים */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק יב — ניכויים אישיים</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="אבדן כושר עצמאי — נישום (112)" id="disability_insurance_self_taxpayer" value={inputs.disability_insurance_self_taxpayer} onChange={handleInputChange} />
-              <InputField label="אבדן כושר עצמאי — בן/בת זוג (113)" id="disability_insurance_self_spouse" value={inputs.disability_insurance_self_spouse} onChange={handleInputChange} />
-              <InputField label="אבדן כושר שכיר — נישום (206)" id="disability_insurance_employee_taxpayer" value={inputs.disability_insurance_employee_taxpayer} onChange={handleInputChange} />
-              <InputField label="אבדן כושר שכיר — בן/בת זוג (207)" id="disability_insurance_employee_spouse" value={inputs.disability_insurance_employee_spouse} onChange={handleInputChange} />
-              <InputField label="קרן השתלמות עצמאי — נישום (136)" id="education_fund_self_taxpayer" value={inputs.education_fund_self_taxpayer} onChange={handleInputChange} />
-              <InputField label="קרן השתלמות עצמאי — בן/בת זוג (137)" id="education_fund_self_spouse" value={inputs.education_fund_self_spouse} onChange={handleInputChange} />
-              <InputField label={'קופ"ג עצמאי — נישום (135)'} id="pension_self_taxpayer" value={inputs.pension_self_taxpayer} onChange={handleInputChange} />
-              <InputField label={'קופ"ג עצמאי — בן/בת זוג (180)'} id="pension_self_spouse" value={inputs.pension_self_spouse} onChange={handleInputChange} />
-              <InputField label={'ביט"ל לא-עבודה — נישום (030)'} id="nii_non_employment_taxpayer" value={inputs.nii_non_employment_taxpayer} onChange={handleInputChange} />
-              <InputField label={'ביט"ל לא-עבודה — בן/בת זוג (089)'} id="nii_non_employment_spouse" value={inputs.nii_non_employment_spouse} onChange={handleInputChange} />
-            </div>
+  const clearCurrentTab = () => {
+    setTabValidationErrors([])
+    setError('')
+    if (activeTab === 'personal') {
+      setPersonalForm({})
+      return
+    }
+    if (activeTab === 'general') {
+      setGeneralForm({})
+      return
+    }
+    setInputs((prev) => Object.fromEntries(Object.keys(prev).map((key) => [key, ''])))
+    setAutoFilled(new Set())
+  }
 
-            {/* חלק יג — נקודות זיכוי */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק יג — נקודות זיכוי</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="נקודות זיכוי — נישום (0=אוטומטי)" id="credit_points_taxpayer" value={inputs.credit_points_taxpayer} onChange={handleInputChange} placeholder="אוטומטי 2.25" step="0.25" />
-              <InputField label="נקודות זיכוי — בן/בת זוג (0=אוטומטי)" id="credit_points_spouse" value={inputs.credit_points_spouse} onChange={handleInputChange} placeholder="אוטומטי 2.75" step="0.25" />
-              <InputField label="נקודות ילדים — נישום (260)" id="children_credit_points_taxpayer" value={inputs.children_credit_points_taxpayer} onChange={handleInputChange} step="0.5" />
-              <InputField label="נקודות ילדים — בן/בת זוג (262)" id="children_credit_points_spouse" value={inputs.children_credit_points_spouse} onChange={handleInputChange} step="0.5" />
-              <InputField label="הורה חד-הורי (026)" id="single_parent_points" value={inputs.single_parent_points} onChange={handleInputChange} step="0.5" />
-            </div>
+  const validateCurrentTab = () => {
+    const errors: string[] = []
 
-            {/* חלק יד — זיכויים */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק יד — זיכויים מהמס</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="ביטוח חיים — נישום (036)" id="life_insurance_taxpayer" value={inputs.life_insurance_taxpayer} onChange={handleInputChange} />
-              <InputField label="ביטוח חיים — בן/בת זוג (081)" id="life_insurance_spouse" value={inputs.life_insurance_spouse} onChange={handleInputChange} />
-              <InputField label="שאירים — נישום (140)" id="survivors_insurance_taxpayer" value={inputs.survivors_insurance_taxpayer} onChange={handleInputChange} />
-              <InputField label="שאירים — בן/בת זוג (240)" id="survivors_insurance_spouse" value={inputs.survivors_insurance_spouse} onChange={handleInputChange} />
-              <InputField label="עמית עצמאי — נישום (268)" id="pension_self_credit_taxpayer" value={inputs.pension_self_credit_taxpayer} onChange={handleInputChange} />
-              <InputField label="עמית עצמאי — בן/בת זוג (269)" id="pension_self_credit_spouse" value={inputs.pension_self_credit_spouse} onChange={handleInputChange} />
-              <InputField label="מוסד — נישום (132)" id="institution_care_taxpayer" value={inputs.institution_care_taxpayer} onChange={handleInputChange} />
-              <InputField label="מוסד — בן/בת זוג (232)" id="institution_care_spouse" value={inputs.institution_care_spouse} onChange={handleInputChange} />
-              <InputField label="תרומות — נישום (037)" id="donation_taxpayer" value={inputs.donation_taxpayer} onChange={handleInputChange} placeholder="אוטומטי מ-106" />
-              <InputField label="תרומות — בן/בת זוג (237)" id="donation_spouse" value={inputs.donation_spouse} onChange={handleInputChange} />
-              <InputField label={'תרומות ארה"ב — נישום (046)'} id="donation_us_taxpayer" value={inputs.donation_us_taxpayer} onChange={handleInputChange} />
-              <InputField label={'תרומות ארה"ב — בן/בת זוג (048)'} id="donation_us_spouse" value={inputs.donation_us_spouse} onChange={handleInputChange} />
-              <InputField label={'מו"פ — נישום (155)'} id="rnd_investment_taxpayer" value={inputs.rnd_investment_taxpayer} onChange={handleInputChange} />
-              <InputField label={'מו"פ — בן/בת זוג (199)'} id="rnd_investment_spouse" value={inputs.rnd_investment_spouse} onChange={handleInputChange} />
-              <InputField label="אילת — הכנסה מזכה (183)" id="eilat_income_taxpayer" value={inputs.eilat_income_taxpayer} onChange={handleInputChange} />
-            </div>
+    if (activeTab === 'personal') {
+      const requiredFields = [
+        ['taxpayer_id', 'חסר מספר זהות של בן הזוג הרשום'],
+        ['taxpayer_first_name', 'חסר שם פרטי של בן הזוג הרשום'],
+        ['taxpayer_last_name', 'חסר שם משפחה של בן הזוג הרשום'],
+        ['taxpayer_birth_date', 'חסר תאריך לידה של בן הזוג הרשום'],
+        ['marital_status', 'חסר מצב משפחתי בשנת המס'],
+      ] as const
 
-            {/* חלק טו — ניכויים במקור */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">חלק טו — ניכויים במקור</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label="מס שכירות ששולם (220)" id="rental_tax_paid" value={inputs.rental_tax_paid} onChange={handleInputChange} placeholder="אוטומטי מאישור" />
-              <InputField label="ניכוי מהכנסות אחרות (040)" id="withholding_other" value={inputs.withholding_other} onChange={handleInputChange} />
-              <InputField label="מס שבח (041)" id="land_appreciation_tax" value={inputs.land_appreciation_tax} onChange={handleInputChange} />
-            </div>
+      for (const [field, message] of requiredFields) {
+        if (!readPersonalValue(field).trim()) errors.push(message)
+      }
 
-            {/* הוצאות הפקת הכנסה */}
-            <h3 className="text-sm font-semibold text-muted-foreground border-b pb-1 mt-6">הוצאות הפקת הכנסה</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <InputField label={'דמי רו"ח — נישום'} id="production_expenses_taxpayer" value={inputs.production_expenses_taxpayer} onChange={handleInputChange} placeholder="למשל 1,170" />
-              <InputField label={'דמי רו"ח — בן/בת זוג'} id="production_expenses_spouse" value={inputs.production_expenses_spouse} onChange={handleInputChange} />
-              <InputField label="הפרשי הצמדה וריבית" id="interest_cpi_adjustment" value={inputs.interest_cpi_adjustment} onChange={handleInputChange} placeholder="מתוך השומה" />
+      const taxpayerId = readPersonalValue('taxpayer_id').replace(/\D/g, '')
+      const spouseId = readPersonalValue('spouse_id').replace(/\D/g, '')
+      if (taxpayerId && taxpayerId.length < 8) errors.push('מספר זהות של בן הזוג הרשום קצר מדי')
+      if (spouseId && spouseId.length < 8) errors.push('מספר זהות של בן/בת הזוג קצר מדי')
+      const email = readPersonalValue('email')
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('כתובת הדוא"ל אינה תקינה')
+    }
+
+    if (activeTab === 'general') {
+      const importantCodes = ['foreign_income_file', 'foreign_income_household', 'settlement_type', '331', '297', '365']
+      for (const code of importantCodes) {
+        if (!generalForm[code]) errors.push(`חסר מענה לשדה ${code} בפרטים כלליים`)
+      }
+      for (const code of ['273', '274']) {
+        if (generalForm[code] && !generalForm[`${code}_date`]) {
+          errors.push(`חסר תאריך עבור שדה ${code}`)
+        }
+      }
+      if (generalForm['331'] === 'yes' && !generalForm['331_detail']) {
+        errors.push('נדרש לבחור פירוט עבור שדה 331')
+      }
+      if (generalForm['spouse_report_mode'] === 'yes' && !generalForm['spouse_report_mode_detail']) {
+        errors.push('נדרש לבחור פירוט עבור שדה בן/בת זוג')
+      }
+      if (generalForm['263'] === 'yes' && !generalForm['263_reference']) {
+        errors.push('נדרש לציין אסמכתה עבור שדה 263')
+      }
+      if (generalForm['108'] === 'true' && getCheckedGroupValues(generalForm, '108_roles').length === 0) {
+        errors.push('נדרש לבחור לפחות פירוט אחד עבור שדה 108')
+      }
+    }
+
+    if (activeTab === 'income') {
+      const hasAnyValue = Object.values(inputs).some((value) => value.trim() !== '') || yearDocs.length > 0
+      if (!hasAnyValue) errors.push('לא מולאו נתונים בפירוט הכנסות ואין מסמכים שהועלו')
+    }
+
+    setTabValidationErrors(errors)
+    setError(errors.length === 0 ? '' : '')
+  }
+
+  const personalPrefill = {
+    tax_file_number: '',
+    tax_year: String(taxYear),
+    taxpayer_id: String(idSupplement?.extracted?.holder_id?.value || ''),
+    taxpayer_first_name: String(idSupplement?.extracted?.holder_name?.value || '').split(' ')[0] || '',
+    taxpayer_last_name: String(idSupplement?.extracted?.holder_name?.value || '').split(' ').slice(1).join(' '),
+    taxpayer_birth_date: normalizeSupplementDate(String(idSupplement?.extracted?.holder_birth_date?.value || '')),
+    taxpayer_occupation: '',
+    branch_code: '',
+    spouse_id: String(idSupplement?.extracted?.spouse_id?.value || ''),
+    spouse_first_name: String(idSupplement?.extracted?.spouse_name?.value || '').split(' ')[0] || '',
+    spouse_last_name: String(idSupplement?.extracted?.spouse_name?.value || '').split(' ').slice(1).join(' ') || String(idSupplement?.extracted?.holder_name?.value || '').split(' ').slice(1).join(' '),
+    spouse_birth_date: normalizeSupplementDate(String(idSupplement?.extracted?.spouse_birth_date?.value || '')),
+    marital_status: idSupplement?.extracted?.spouse_id?.value ? 'נשוי' : '',
+    filing_status: '',
+    spouse_has_separate_file: 'false',
+    address_street: String(idSupplement?.extracted?.address_street?.value || ''),
+    address_house_number: String(idSupplement?.extracted?.address_house_number?.value || ''),
+    address_city: String(idSupplement?.extracted?.address_city?.value || ''),
+    address_zip: String(idSupplement?.extracted?.address_zip?.value || ''),
+    address_po_box: '',
+    email: '',
+    phone: '',
+    cellphone: '',
+    fax: '',
+    business_activity: '',
+    business_name: '',
+    business_address: '',
+    business_city: '',
+    business_tax_file: '',
+    employees_count: '',
+    bank_number: '',
+    branch_number: '',
+    account_number: '',
+    account_owner_name: '',
+    representative_name: '',
+    representative_license: '',
+    representative_phone: '',
+    representative_email: '',
+  }
+
+  const readPersonalValue = (key: string) => personalForm[key] ?? personalPrefill[key as keyof typeof personalPrefill] ?? ''
+
+  const isAutoFilledFromId = (key: string) => {
+    if (!idSupplement) return false
+    const map: Record<string, string> = {
+      taxpayer_id: 'holder_id',
+      taxpayer_first_name: 'holder_name',
+      taxpayer_last_name: 'holder_name',
+      taxpayer_birth_date: 'holder_birth_date',
+      spouse_id: 'spouse_id',
+      spouse_first_name: 'spouse_name',
+      spouse_last_name: 'spouse_name',
+      spouse_birth_date: 'spouse_birth_date',
+      address_street: 'address_street',
+      address_house_number: 'address_house_number',
+      address_city: 'address_city',
+      address_zip: 'address_zip',
+    }
+    const sourceField = map[key]
+    return sourceField ? hasIdSupplementValue(idSupplement, sourceField) : false
+  }
+
+  const renderPersonalInput = (key: string, placeholder = '', type = 'text', className = '') => (
+    <input
+      type={type}
+      value={readPersonalValue(key)}
+      placeholder={placeholder}
+      onChange={(e) => setPersonalForm((prev) => ({ ...prev, [key]: e.target.value }))}
+      className={cn(
+        'h-7 w-full rounded-xs border border-[#b8c9dc] bg-white px-2 text-sm',
+        isAutoFilledFromId(key) && 'border-green-300 bg-green-50 text-[#1f5132]',
+        className,
+      )}
+      autoComplete="off"
+    />
+  )
+
+  const renderSectionTitle = (title: string) => (
+    <div className="bg-[#dfeaf5] border-y border-[#c3d3e4] px-3 py-1.5 text-sm font-bold text-[#23496d]">
+      {title}
+    </div>
+  )
+
+  const renderPersonalTab = () => (
+    <div className="border border-[#efb443] bg-white shadow-sm">
+      <div className="p-3">
+        {renderDraftActions()}
+        {idSupplement ? (
+          <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-[#1f5132]">
+            פרטים מזהים שזוהו מספח תעודת הזהות מולאו אוטומטית. נדרש להשלים כאן רק פרטים שלא מופיעים בספח, כמו תאריכי לידה, כתובת ופרטי קשר.
+          </div>
+        ) : null}
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button onClick={nextTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">הבא &lt;</button>
+          <button onClick={clearCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">ניקוי</button>
+          <button onClick={validateCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">בדיקה</button>
+          <button className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">חזרה</button>
+        </div>
+
+        {tabValidationErrors.length > 0 && activeTab === 'personal' && (
+          <div className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <ul className="space-y-1">
+              {tabValidationErrors.map((validationError) => (
+                <li key={validationError}>{validationError}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <table className="mb-4 w-full border-collapse text-sm">
+          <tbody>
+            <tr className="bg-[#dfeaf5] text-[#23496d] font-bold">
+              {PERSONAL_SUMMARY_FIELDS.map((field) => (
+                <td key={field.key} className="border border-[#c3d3e4] px-2 py-1 text-center">{field.label}</td>
+              ))}
+            </tr>
+            <tr>
+              {PERSONAL_SUMMARY_FIELDS.map((field) => (
+                <td key={field.key} className="border border-[#c3d3e4] px-1 py-1">{renderPersonalInput(field.key)}</td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+        <div className="mb-4 border border-[#c3d3e4] bg-[#f8fbff] px-3 py-2 text-sm">
+          <div className="mb-2 font-bold text-[#23496d]">מצב משפחתי בשנת המס</div>
+          <div className="flex flex-wrap items-center gap-4">
+            {PERSONAL_STATUS_OPTIONS.map((status) => (
+              <label key={status} className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="marital_status"
+                  checked={readPersonalValue('marital_status') === status}
+                  onChange={() => setPersonalForm((prev) => ({ ...prev, marital_status: status }))}
+                />
+                {status}
+              </label>
+            ))}
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={readPersonalValue('spouse_has_separate_file') === 'true'}
+                onChange={(e) => setPersonalForm((prev) => ({ ...prev, spouse_has_separate_file: String(e.target.checked) }))}
+              />
+              בן זוג עם תיק נפרד
+            </label>
+            <select
+              className="h-7 rounded-xs border border-[#b8c9dc] bg-white px-2 text-sm"
+              value={readPersonalValue('filing_status')}
+              onChange={(e) => setPersonalForm((prev) => ({ ...prev, filing_status: e.target.value }))}
+            >
+              <option value="">שיוך לתושב חוץ</option>
+              <option value="none">לא</option>
+              <option value="yes">כן</option>
+            </select>
+          </div>
+        </div>
+
+        {renderSectionTitle('בן הזוג הרשום / בת זוג')}
+        <div className="grid grid-cols-1 gap-4 border-x border-b border-[#c3d3e4] p-3 md:grid-cols-2">
+          <div>
+            <div className="mb-2 text-sm font-bold text-[#23496d]">בן הזוג הרשום</div>
+            <div className="grid grid-cols-[120px_1fr] gap-2 text-sm">
+              <div className="self-center">מספר זהות</div>{renderPersonalInput('taxpayer_id')}
+              <div className="self-center">שם משפחה</div>{renderPersonalInput('taxpayer_last_name')}
+              <div className="self-center">שם פרטי</div>{renderPersonalInput('taxpayer_first_name')}
+              <div className="self-center">תאריך לידה</div>{renderPersonalInput('taxpayer_birth_date', '', 'date')}
             </div>
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <div className="mb-2 text-sm font-bold text-[#23496d]">בן/בת זוג</div>
+            <div className="grid grid-cols-[120px_1fr] gap-2 text-sm">
+              <div className="self-center">מספר זהות</div>{renderPersonalInput('spouse_id')}
+              <div className="self-center">שם משפחה</div>{renderPersonalInput('spouse_last_name')}
+              <div className="self-center">שם פרטי</div>{renderPersonalInput('spouse_first_name')}
+              <div className="self-center">תאריך לידה</div>{renderPersonalInput('spouse_birth_date', '', 'date')}
+            </div>
+          </div>
+        </div>
 
-      {/* Calculate button */}
-      <div className="flex justify-center">
-        <Button onClick={handleCalculate} disabled={loading} size="lg" className="gap-2 px-8">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
-          חשב והכן מדריך מילוי
-        </Button>
+        {renderSectionTitle('פרטי התקשרות')}
+        <div className="grid grid-cols-1 gap-3 border-x border-b border-[#c3d3e4] p-3 md:grid-cols-[1fr_1fr]">
+          <div className="grid grid-cols-[120px_1fr] gap-2 text-sm">
+            <div className="self-center">רחוב</div>{renderPersonalInput('address_street')}
+            <div className="self-center">מספר בית</div>{renderPersonalInput('address_house_number')}
+            <div className="self-center">יישוב</div>{renderPersonalInput('address_city')}
+            <div className="self-center">מיקוד</div>{renderPersonalInput('address_zip')}
+            <div className="self-center">ת.ד.</div>{renderPersonalInput('address_po_box')}
+          </div>
+          <div className="grid grid-cols-[120px_1fr] gap-2 text-sm">
+            <div className="self-center">טלפון</div>{renderPersonalInput('phone')}
+            <div className="self-center">טלפון נייד</div>{renderPersonalInput('cellphone')}
+            <div className="self-center">פקס</div>{renderPersonalInput('fax')}
+            <div className="self-center">כתובת דוא"ל</div>{renderPersonalInput('email')}
+          </div>
+        </div>
+
+        {renderSectionTitle('פרטי העסק')}
+        <div className="grid grid-cols-1 gap-3 border-x border-b border-[#c3d3e4] p-3 md:grid-cols-2">
+          <div className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+            <div className="self-center">העיסוק העיקרי</div>{renderPersonalInput('business_activity')}
+            <div className="self-center">שם העסק</div>{renderPersonalInput('business_name')}
+            <div className="self-center">כתובת העסק</div>{renderPersonalInput('business_address')}
+            <div className="self-center">יישוב העסק</div>{renderPersonalInput('business_city')}
+          </div>
+          <div className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+            <div className="self-center">מספר תיק העסק</div>{renderPersonalInput('business_tax_file')}
+            <div className="self-center">שמות המעבידים</div>{renderPersonalInput('employees_count')}
+          </div>
+        </div>
+
+        {renderSectionTitle('פרטי בנק')}
+        <div className="grid grid-cols-1 gap-3 border-x border-b border-[#c3d3e4] p-3 md:grid-cols-[120px_1fr_120px_1fr_120px_1fr] text-sm">
+          <div className="self-center">קוד בנק</div>{renderPersonalInput('bank_number')}
+          <div className="self-center">סמל סניף</div>{renderPersonalInput('branch_number')}
+          <div className="self-center">מספר חשבון</div>{renderPersonalInput('account_number')}
+          <div className="self-center">שם בעל החשבון</div>{renderPersonalInput('account_owner_name')}
+        </div>
+
+        {renderSectionTitle('פרטי מגיש הדו"ח')}
+        <div className="grid grid-cols-1 gap-3 border-x border-b border-[#c3d3e4] p-3 md:grid-cols-2">
+          <div className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+            <div className="self-center">שם המשרד</div>{renderPersonalInput('representative_name')}
+            <div className="self-center">מספר עוסק מורשה</div>{renderPersonalInput('representative_license')}
+          </div>
+          <div className="grid grid-cols-[140px_1fr] gap-2 text-sm">
+            <div className="self-center">טלפון</div>{renderPersonalInput('representative_phone')}
+            <div className="self-center">כתובת דוא"ל</div>{renderPersonalInput('representative_email')}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button onClick={nextTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">הבא &lt;</button>
+          <button onClick={clearCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">ניקוי</button>
+          <button onClick={validateCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">בדיקה</button>
+          <button className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">חזרה</button>
+        </div>
       </div>
+    </div>
+  )
+
+  const updateGeneralValue = (key: string, value: string) => {
+    setGeneralForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const toggleGeneralGroupValue = (key: string, option: string, checked: boolean) => {
+    setGeneralForm((prev) => {
+      const values = new Set(getCheckedGroupValues(prev, key))
+      if (checked) values.add(option)
+      else values.delete(option)
+      return { ...prev, [key]: Array.from(values).join('|') }
+    })
+  }
+
+  const renderGeneralControl = (row: GeneralRow) => {
+    const value = generalForm[row.code] ?? ''
+    if (row.type === 'checkbox') {
+      return <input type="checkbox" checked={value === 'true'} onChange={(e) => updateGeneralValue(row.code, String(e.target.checked))} />
+    }
+    if (row.type === 'select') {
+      return (
+        <select className="h-8 rounded-sm border border-gray-300 bg-white px-2 text-sm" value={value} onChange={(e) => updateGeneralValue(row.code, e.target.value)}>
+          <option value="">בחר</option>
+          {(row.options ?? [
+            { value: 'no', label: 'לא' },
+            { value: 'yes', label: 'כן' },
+          ]).map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      )
+    }
+    if (row.type === 'immigrant-status-date') {
+      return (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'new_immigrant'} onChange={() => updateGeneralValue(row.code, 'new_immigrant')} />עולה חדש</label>
+          <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'veteran_returning_resident'} onChange={() => updateGeneralValue(row.code, 'veteran_returning_resident')} />תושב חוזר ותיק</label>
+          <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'returning_resident'} onChange={() => updateGeneralValue(row.code, 'returning_resident')} />תושב חוזר</label>
+          <button
+            type="button"
+            className="rounded border border-gray-300 px-2 py-1 text-xs text-[#23496d]"
+            onClick={() => {
+              updateGeneralValue(row.code, '')
+              updateGeneralValue(`${row.code}_date`, '')
+            }}
+          >ניקוי</button>
+          <input type="date" className="h-8 rounded-sm border border-gray-300 bg-white px-2 disabled:bg-gray-100" disabled={!value} value={generalForm[`${row.code}_date`] || ''} onChange={(e) => updateGeneralValue(`${row.code}_date`, e.target.value)} />
+        </div>
+      )
+    }
+    if (row.type === 'radio-with-select') {
+      const detailValue = generalForm[`${row.code}_detail`] ?? ''
+      return (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'no'} onChange={() => {
+            updateGeneralValue(row.code, 'no')
+            updateGeneralValue(`${row.code}_detail`, '')
+          }} />לא</label>
+          <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'yes'} onChange={() => updateGeneralValue(row.code, 'yes')} />כן</label>
+          <select className="h-8 rounded-sm border border-gray-300 bg-white px-2 text-sm disabled:bg-gray-100" disabled={value !== 'yes'} value={detailValue} onChange={(e) => updateGeneralValue(`${row.code}_detail`, e.target.value)}>
+            <option value="">בחר</option>
+            {(row.options ?? []).map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      )
+    }
+    if (row.type === 'radio-with-text') {
+      const referenceValue = generalForm[`${row.code}_reference`] ?? ''
+      return (
+        <div className="space-y-2 text-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'no'} onChange={() => {
+              updateGeneralValue(row.code, 'no')
+              updateGeneralValue(`${row.code}_reference`, '')
+            }} />לא</label>
+            <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'yes'} onChange={() => updateGeneralValue(row.code, 'yes')} />כן</label>
+            <input type="text" className="h-8 min-w-45 rounded-sm border border-gray-300 px-2 disabled:bg-gray-100" disabled={value !== 'yes'} value={referenceValue} placeholder="לדוגמה: טופס 1213" onChange={(e) => updateGeneralValue(`${row.code}_reference`, e.target.value)} />
+          </div>
+          {row.hint ? <div className="text-xs text-[#5d6f85]">{row.hint}</div> : null}
+        </div>
+      )
+    }
+    if (row.type === 'checkbox-group') {
+      const checkedValues = getCheckedGroupValues(generalForm, `${row.code}_roles`)
+      const isChecked = value === 'true'
+      return (
+        <div className="space-y-2 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={isChecked} onChange={(e) => {
+            updateGeneralValue(row.code, String(e.target.checked))
+            if (!e.target.checked) updateGeneralValue(`${row.code}_roles`, '')
+          }} />יש נאמנות רלוונטית</label>
+          <div className="flex flex-col gap-1 text-[#23496d]">
+            {(row.options ?? []).map((option) => (
+              <label key={option.value} className="flex items-center gap-2">
+                <input type="checkbox" disabled={!isChecked} checked={checkedValues.includes(option.value)} onChange={(e) => toggleGeneralGroupValue(`${row.code}_roles`, option.value, e.target.checked)} />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-4 text-sm">
+        <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'no'} onChange={() => updateGeneralValue(row.code, 'no')} />לא</label>
+        <label className="flex items-center gap-1"><input type="radio" name={row.code} checked={value === 'yes'} onChange={() => updateGeneralValue(row.code, 'yes')} />כן</label>
+      </div>
+    )
+  }
+
+  const renderGeneralTab = () => (
+    <div className="border border-[#efb443] bg-white shadow-sm">
+      <div className="p-3">
+        {renderDraftActions()}
+        <div className="mb-4 rounded-md border border-[#cfe0f0] bg-[#f7fbff] px-3 py-3 text-sm text-[#23496d]">
+          <div className="font-bold">עזרה במילוי הפרטים הכלליים</div>
+          <div className="mt-1 text-[#5d6f85]">לכל שדה יש עכשיו הסבר קצר בעברית. אם משהו לא ברור, אפשר לבחור שדה ולשאול את העוזר לפני החישוב.</div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <button type="button" className="rounded border border-[#c3d3e4] bg-white px-2 py-1" onClick={() => chatRef.current?.askAndSend(buildFieldAssistantQuestion(GENERAL_INFO_SECTIONS[0].rows[0]))}>מה זו הכנסה מחו"ל?</button>
+            <button type="button" className="rounded border border-[#c3d3e4] bg-white px-2 py-1" onClick={() => chatRef.current?.askAndSend(buildFieldAssistantQuestion(GENERAL_INFO_SECTIONS[0].rows[3]))}>מה זה בה"ח/י עולה?</button>
+            <button type="button" className="rounded border border-[#c3d3e4] bg-white px-2 py-1" onClick={() => chatRef.current?.askAndSend(buildFieldAssistantQuestion(GENERAL_INFO_SECTIONS[1].rows[0]))}>מתי מסמנים שדה 331?</button>
+          </div>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button onClick={nextTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">הבא &lt;</button>
+          <button onClick={clearCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">ניקוי</button>
+          <button onClick={validateCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">בדיקה</button>
+        </div>
+
+        {tabValidationErrors.length > 0 && activeTab === 'general' && (
+          <div className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <ul className="space-y-1">
+              {tabValidationErrors.map((validationError) => (
+                <li key={validationError}>{validationError}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {GENERAL_INFO_SECTIONS.map((section) => (
+          <div key={section.title} className="mb-5">
+            {renderSectionTitle(section.title)}
+            <table className="w-full border-collapse text-sm">
+              <tbody>
+                {section.rows.map((row) => (
+                  <tr key={row.code} className="border-x border-b border-[#c3d3e4] align-top">
+                    <td className="w-16 bg-[#eef4fb] px-2 py-3 text-center font-mono font-bold text-[#23496d]">{renderGeneralCodeBadge(row)}</td>
+                    <td className="px-3 py-3 text-right text-[#23496d]">
+                      <div>{row.label}</div>
+                      <div className="mt-1 text-xs leading-5 text-[#5d6f85]">{row.explanation}</div>
+                      {row.hint ? <div className="mt-1 text-xs text-[#6a7b90]">{row.hint}</div> : null}
+                      <button
+                        type="button"
+                        className="mt-2 rounded border border-[#c3d3e4] bg-white px-2 py-1 text-xs text-[#23496d] hover:bg-[#eef4fb]"
+                        onClick={() => chatRef.current?.askAndSend(buildFieldAssistantQuestion(row))}
+                      >
+                        לא בטוח? שאל את העוזר
+                      </button>
+                    </td>
+                    <td className="w-[320px] px-3 py-3">{renderGeneralControl(row)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        <div className="flex flex-wrap gap-2">
+          <button onClick={nextTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">הבא &lt;</button>
+          <button onClick={clearCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">ניקוי</button>
+          <button onClick={validateCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">בדיקה</button>
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-4 pb-12">
+      {/* ===== HEADER ===== */}
+      <div className="bg-[#1a3a5c] text-white px-6 py-4 rounded-t-lg">
+        <h1 className="text-lg font-bold text-center">
+          דוח שנתי על ההכנסה — טופס 1301 — שנת המס {taxYear}
+        </h1>
+      </div>
+
+      <div className="flex items-end justify-end gap-1 border-b border-[#d7e2f0]">
+        <button onClick={() => setActiveTab('personal')} className={cn('px-4 py-2 text-sm border border-b-0 rounded-t-md', activeTab === 'personal' ? 'bg-[#f6b73c] text-[#1a3a5c] font-bold' : 'bg-[#eef4fb] text-[#4a6482]')}>פרטים אישיים</button>
+        <button onClick={() => setActiveTab('general')} className={cn('px-4 py-2 text-sm border border-b-0 rounded-t-md', activeTab === 'general' ? 'bg-[#f6b73c] text-[#1a3a5c] font-bold' : 'bg-[#eef4fb] text-[#4a6482]')}>פרטים כלליים</button>
+        <button onClick={() => setActiveTab('income')} className={cn('px-4 py-2 text-sm border border-b-0 rounded-t-md', activeTab === 'income' ? 'bg-[#f6b73c] text-[#1a3a5c] font-bold' : 'bg-[#eef4fb] text-[#4a6482]')}>פירוט הכנסות</button>
+      </div>
+
+      {/* ===== DOCUMENTS BAR ===== */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 rounded-md border text-sm">
+        <FileText className="h-4 w-4 text-gray-400 shrink-0" />
+        {yearDocs.length === 0 ? (
+          <span className="text-muted-foreground">
+            לא הועלו מסמכים.{' '}
+            <a href="/documents" className="text-primary underline">העלה מסמכים</a>
+          </span>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(docsByType).map(([type, docs]) => (
+              <span key={type} className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-xs border">
+                <CheckCircle2 className="h-3 w-3 text-green-600" />
+                {DOC_TYPE_LABELS[type] || type} ({docs.length})
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {activeTab === 'personal' && renderPersonalTab()}
+      {activeTab === 'general' && renderGeneralTab()}
+
+      {/* ===== IRS FORM TABLE ===== */}
+      {activeTab === 'income' && <div className="border rounded-lg overflow-hidden shadow-sm">
+        <div className="border-b bg-white px-4 py-3">
+          {renderDraftActions()}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={nextTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">הבא &lt;</button>
+            <button onClick={clearCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">ניקוי</button>
+            <button onClick={validateCurrentTab} className="rounded bg-[#2f658d] px-4 py-1 text-sm text-white">בדיקה</button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm min-w-175">
+            <thead>
+              <tr className="bg-[#1a3a5c] text-white">
+                <th rowSpan={2} className="py-2 px-2 text-center w-10 border-l border-[#2a4a6c]">מס׳</th>
+                <th rowSpan={2} className="py-2 px-3 text-right border-l border-[#2a4a6c]">תיאור</th>
+                <th colSpan={2} className="py-1.5 px-2 text-center border-l border-b border-[#2a4a6c]">בן הזוג הרשום</th>
+                <th colSpan={2} className="py-1.5 px-2 text-center border-b border-[#2a4a6c]">בן/בת הזוג</th>
+              </tr>
+              <tr className="bg-[#24476a] text-white/80 text-xs">
+                <th className="py-1 px-1 text-center w-10 border-l border-[#2a4a6c]">שדה</th>
+                <th className="py-1 px-1 text-center w-30 border-l border-[#2a4a6c]">סכום</th>
+                <th className="py-1 px-1 text-center w-10 border-l border-[#2a4a6c]">שדה</th>
+                <th className="py-1 px-1 text-center w-30">סכום</th>
+              </tr>
+            </thead>
+            <tbody>
+              {IRS_SECTIONS.map((section) => (
+                <Fragment key={section.partId}>
+                  <tr className="bg-[#dce7f5]">
+                    <td colSpan={6} className="py-2 px-3 font-bold text-[#1a3a5c] border-b border-[#b5c8e0]">
+                      {section.title}
+                    </td>
+                  </tr>
+                  {section.rows.map((row) => (
+                    <tr key={row.num} className="border-b border-gray-200 hover:bg-blue-50/30">
+                      <td className="py-1 px-2 text-center text-xs text-gray-400 border-l border-gray-100">
+                        {row.num}
+                      </td>
+                      <td className="py-1 px-3 border-l border-gray-100">
+                        <div>{row.description}</div>
+                        {row.notes?.length ? (
+                          <div className="mt-0.5 space-y-0.5 text-[11px] text-[#60738b]">
+                            {row.notes.map((note) => (
+                              <div key={note}>{note}</div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="py-1 px-1 text-center font-mono text-[11px] font-bold text-[#1a3a5c] border-l border-gray-100">
+                        {renderFieldCodeButton(row.taxpayer?.code)}
+                      </td>
+                      <td className="py-0.5 px-1.5 border-l border-gray-100">
+                        {row.taxpayer && renderCell(row.taxpayer)}
+                      </td>
+                      <td className="py-1 px-1 text-center font-mono text-[11px] font-bold text-[#1a3a5c] border-l border-gray-100">
+                        {renderFieldCodeButton(row.spouse?.code)}
+                      </td>
+                      <td className="py-0.5 px-1.5">
+                        {row.spouse && renderCell(row.spouse)}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Calculate button inside form container */}
+        <div className="bg-gray-50 border-t px-4 py-3 flex justify-center">
+          <Button onClick={handleCalculate} disabled={loading} size="lg" className="gap-2 px-10">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+            חשב
+          </Button>
+        </div>
+      </div>}
 
       {/* Error */}
       {error && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive">
+        <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-destructive text-sm">
           <AlertTriangle className="h-4 w-4" />
           {error}
         </div>
       )}
 
-      {/* ====== RESULTS — Form Filling Guide ====== */}
+      <Dialog open={fieldHelpOpen} onClose={() => setFieldHelpOpen(false)}>
+        <DialogHeader onClose={() => setFieldHelpOpen(false)}>
+          <div>
+            <DialogTitle>{fieldHelp?.title || 'הסבר שדה'}</DialogTitle>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {fieldHelp?.code ? `שדה ${fieldHelp.code}` : ''}
+              {fieldHelp?.part_name_he ? ` | ${fieldHelp.part_name_he}` : ''}
+              {fieldHelp?.section_num ? ` | סעיף ${fieldHelp.section_num}` : ''}
+            </div>
+          </div>
+        </DialogHeader>
+        <DialogContent className="space-y-4 text-sm leading-6">
+          {fieldHelpLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              טוען הסבר שדה...
+            </div>
+          ) : (
+            <>
+              <p>{fieldHelp?.description}</p>
+              {fieldHelp?.tax_rate ? (
+                <div className="rounded border bg-[#f8fbff] px-3 py-2 text-[#23496d]">
+                  שיעור מס רלוונטי: {fieldHelp.tax_rate}
+                </div>
+              ) : null}
+              {fieldHelp?.guide_line ? (
+                <div className="text-xs text-[#60738b]">
+                  הפניה בקובץ ההנחיות: שורה {fieldHelp.guide_line}
+                </div>
+              ) : null}
+              {fieldHelp?.notes?.length ? (
+                <div>
+                  <div className="mb-1 font-semibold text-[#23496d]">הערות</div>
+                  <ul className="space-y-1 text-[#4f6279]">
+                    {fieldHelp.notes.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== RESULTS ===== */}
       {r && (
-        <div className="space-y-4">
-          {/* Balance card */}
+        <div ref={resultRef} className="space-y-4 mt-6">
+          {/* Balance */}
           <Card className={cn(
             'border-2',
-            balance > 0 ? 'border-red-300 bg-red-50' : 'border-green-300 bg-green-50'
+            balance > 0 ? 'border-red-300 bg-red-50' : 'border-green-300 bg-green-50',
           )}>
             <CardContent className="flex items-center justify-between py-6">
               <div className="flex items-center gap-3">
-                {balance > 0 ? (
-                  <TrendingUp className="h-8 w-8 text-red-600" />
-                ) : (
-                  <TrendingDown className="h-8 w-8 text-green-600" />
-                )}
+                {balance > 0
+                  ? <TrendingUp className="h-8 w-8 text-red-600" />
+                  : <TrendingDown className="h-8 w-8 text-green-600" />}
                 <div>
-                  <p className="text-lg font-bold">
-                    {balance > 0 ? 'יתרה לתשלום' : 'החזר מס'}
-                  </p>
+                  <p className="text-lg font-bold">{balance > 0 ? 'יתרה לתשלום' : 'החזר מס'}</p>
                   <p className={cn(
                     'text-3xl font-bold',
-                    balance > 0 ? 'text-red-700' : 'text-green-700'
+                    balance > 0 ? 'text-red-700' : 'text-green-700',
                   )}>
                     {formatNIS(Math.abs(balance))}
                   </p>
@@ -932,147 +1860,45 @@ export function Form1301Page() {
             </CardContent>
           </Card>
 
-          {/* === FORM FILLING GUIDE by Parts === */}
-          <h2 className="text-lg font-bold mt-6">מדריך מילוי — לפי סעיפי טופס 1301</h2>
-          <p className="text-sm text-muted-foreground -mt-2">
-            מלא את הערכים הבאים בטופס המקוון של רשות המסים. שדות עם ✅ מאוכלסים אוטומטית.
-          </p>
-
-          {partGroups.filter((g) => g.sections.length > 0).map((group) => (
-            <Card key={group.partId}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">{group.title}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 p-0">
-                {group.sections.map((section) => {
-                  const isExpanded = expandedSections.has(section.id)
-                  const hasValues = section.fields.some((f) => {
-                    const val = getFieldValue(r, f.key)
-                    return val !== 0
-                  })
-
-                  return (
-                    <div key={section.id} className="border-t">
-                      <button
-                        onClick={() => toggleSection(section.id)}
-                        className={cn(
-                          'w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors text-right',
-                          hasValues && 'font-medium',
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          {hasValues && <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />}
-                          <span>{section.title}</span>
-                          {section.description && (
-                            <span className="text-muted-foreground font-normal hidden md:inline">
-                              — {section.description}
-                            </span>
-                          )}
-                        </div>
-                        {isExpanded ? (
-                          <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                        )}
-                      </button>
-                      {isExpanded && (
-                        <div className="px-4 pb-3">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="text-muted-foreground text-xs">
-                                <th className="text-right py-1 font-normal w-16">קוד שדה</th>
-                                <th className="text-right py-1 font-normal">תיאור</th>
-                                <th className="text-left py-1 font-normal w-32">ערך</th>
-                                <th className="text-left py-1 font-normal w-24">מקור</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {section.fields.map((field) => {
-                                const val = getFieldValue(r, field.key)
-                                const inputVal = field.inputKey ? inputs[field.inputKey] : undefined
-                                const isManual = !!inputVal && Number(inputVal) > 0
-                                const isAuto = !isManual && val > 0 && !!field.source
-
-                                return (
-                                  <tr key={field.code} className={cn(val > 0 ? 'bg-blue-50/50' : '')}>
-                                    <td className="py-1.5 font-mono text-xs font-bold text-blue-800">
-                                      {field.code}
-                                    </td>
-                                    <td className="py-1.5">{field.label}</td>
-                                    <td className="py-1.5 text-left tabular-nums font-medium">
-                                      {val > 0 ? formatNIS(val) : (typeof val === 'string' && val ? val : '—')}
-                                    </td>
-                                    <td className="py-1.5 text-left text-xs">
-                                      {isAuto && (
-                                        <span className="text-green-700">✅ {field.source}</span>
-                                      )}
-                                      {isManual && (
-                                        <span className="text-blue-700">✏️ ידני</span>
-                                      )}
-                                      {!isAuto && !isManual && field.inputKey && (
-                                        <span className="text-muted-foreground">ידני</span>
-                                      )}
-                                      {!isAuto && !isManual && !field.inputKey && field.source && (
-                                        <span className="text-muted-foreground">{field.source}</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </CardContent>
-            </Card>
-          ))}
-
-          {/* Tax Calculation Breakdown */}
+          {/* Tax Breakdown */}
           <Card>
-            <CardHeader>
-              <CardTitle>חישוב מס</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>חישוב מס</CardTitle></CardHeader>
             <CardContent>
               <table className="w-full text-sm">
                 <tbody>
-                  <Row label="מס פרוגרסיבי — נישום" value={r.calculation.tax_regular_taxpayer} />
-                  <Row label="מס פרוגרסיבי — בן/בת זוג" value={r.calculation.tax_regular_spouse} />
-                  <Row label="מס 10% (שכ״ד למגורים)" value={r.calculation.tax_rental_10pct} />
-                  <Row label="מס 15% (ריבית/שכ״ד חו״ל)" value={r.calculation.tax_15pct} />
-                  <Row label="מס 20% (דיבידנד מועדף/ריבית)" value={r.calculation.tax_20pct} />
-                  <Row label="מס 25% (דיבידנד/ריבית)" value={r.calculation.tax_25pct} />
-                  <Row label="מס 30% (דיבידנד מהותי)" value={r.calculation.tax_30pct} />
-                  <Row label="מס 31% (אנרגיות מתחדשות)" value={r.calculation.tax_31pct} />
-                  <Row label="מס 35% (הימורים/משיכה שלא כדין)" value={r.calculation.tax_35pct} />
-                  <Row label="מס רווח הון" value={r.calculation.tax_capital_gains} />
-                  <Row label="מס יסף (3%)" value={r.calculation.surtax} highlight />
-                  <Row label="סה״כ מס ברוטו" value={r.calculation.gross_tax} bold />
+                  <ResultRow label="מס פרוגרסיבי — נישום" value={r.calculation.tax_regular_taxpayer} />
+                  <ResultRow label="מס פרוגרסיבי — בן/בת זוג" value={r.calculation.tax_regular_spouse} />
+                  <ResultRow label="מס 10% (שכ״ד למגורים)" value={r.calculation.tax_rental_10pct} />
+                  <ResultRow label="מס 15% (ריבית/שכ״ד חו״ל)" value={r.calculation.tax_15pct} />
+                  <ResultRow label="מס 20% (דיבידנד מועדף/ריבית)" value={r.calculation.tax_20pct} />
+                  <ResultRow label="מס 25% (דיבידנד/ריבית)" value={r.calculation.tax_25pct} />
+                  <ResultRow label="מס 30% (דיבידנד מהותי)" value={r.calculation.tax_30pct} />
+                  <ResultRow label="מס 31% (אנרגיות מתחדשות)" value={r.calculation.tax_31pct} />
+                  <ResultRow label="מס 35% (הימורים/משיכה שלא כדין)" value={r.calculation.tax_35pct} />
+                  <ResultRow label="מס רווח הון" value={r.calculation.tax_capital_gains} />
+                  <ResultRow label="מס יסף (3%)" value={r.calculation.surtax} highlight />
+                  <ResultRow label="סה״כ מס ברוטו" value={r.calculation.gross_tax} bold />
                 </tbody>
               </table>
             </CardContent>
           </Card>
 
-          {/* Credits Breakdown */}
+          {/* Credits */}
           <Card>
-            <CardHeader>
-              <CardTitle>זיכויים</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>זיכויים</CardTitle></CardHeader>
             <CardContent>
               <table className="w-full text-sm">
                 <tbody>
-                  <Row label="נקודות זיכוי — נישום" value={r.calculation.credit_points_amount_taxpayer} negative />
-                  <Row label="נקודות זיכוי — בן/בת זוג" value={r.calculation.credit_points_amount_spouse} negative />
-                  <Row label="זיכוי פנסיה 45א — נישום" value={r.calculation.pension_employee_credit_taxpayer} negative />
-                  <Row label="זיכוי פנסיה 45א — בן/בת זוג" value={r.calculation.pension_employee_credit_spouse} negative />
-                  <Row label="זיכוי תרומות (35%)" value={r.calculation.donation_credit} negative />
-                  <Row label="זיכוי ביטוח חיים — נישום" value={r.calculation.life_insurance_credit_taxpayer} negative />
-                  <Row label="זיכוי ביטוח חיים — בן/בת זוג" value={r.calculation.life_insurance_credit_spouse} negative />
-                  <Row label="סה״כ זיכויים נישום" value={r.calculation.total_credits_taxpayer} negative />
-                  <Row label="סה״כ זיכויים בן/בת זוג" value={r.calculation.total_credits_spouse} negative />
-                  <Row label="סה״כ זיכויים" value={r.calculation.total_credits} bold negative />
+                  <ResultRow label="נקודות זיכוי — נישום" value={r.calculation.credit_points_amount_taxpayer} negative />
+                  <ResultRow label="נקודות זיכוי — בן/בת זוג" value={r.calculation.credit_points_amount_spouse} negative />
+                  <ResultRow label="זיכוי פנסיה 45א — נישום" value={r.calculation.pension_employee_credit_taxpayer} negative />
+                  <ResultRow label="זיכוי פנסיה 45א — בן/בת זוג" value={r.calculation.pension_employee_credit_spouse} negative />
+                  <ResultRow label="זיכוי תרומות (35%)" value={r.calculation.donation_credit} negative />
+                  <ResultRow label="זיכוי ביטוח חיים — נישום" value={r.calculation.life_insurance_credit_taxpayer} negative />
+                  <ResultRow label="זיכוי ביטוח חיים — בן/בת זוג" value={r.calculation.life_insurance_credit_spouse} negative />
+                  <ResultRow label="סה״כ זיכויים נישום" value={r.calculation.total_credits_taxpayer} negative />
+                  <ResultRow label="סה״כ זיכויים בן/בת זוג" value={r.calculation.total_credits_spouse} negative />
+                  <ResultRow label="סה״כ זיכויים" value={r.calculation.total_credits} bold negative />
                 </tbody>
               </table>
             </CardContent>
@@ -1080,27 +1906,25 @@ export function Form1301Page() {
 
           {/* Summary */}
           <Card>
-            <CardHeader>
-              <CardTitle>סיכום</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>סיכום</CardTitle></CardHeader>
             <CardContent>
               <table className="w-full text-sm">
                 <tbody>
-                  <Row label="מס נטו (אחרי זיכויים)" value={r.calculation.net_tax} bold />
-                  <Row label="מס שנוכה ממשכורת (סעיף 84)" value={r.calculation.total_withheld} negative />
-                  <Row label="ניכוי ריבית/דיבידנד (סעיף 85)" value={r.withholdings.field_043} negative />
-                  <Row label="ניכוי מהכנסות אחרות (סעיף 87)" value={r.withholdings.field_040} negative />
-                  <Row label="מס שבח (סעיף 88)" value={r.withholdings.field_041} negative />
-                  <Row label="מקדמות מדוח שנתי" value={r.withholdings.field_tax_advance} negative />
-                  <Row label="מס שכירות ששולם" value={r.withholdings.field_220} negative />
-                  <Row label="סה״כ ששולם" value={r.calculation.total_paid} bold negative />
+                  <ResultRow label="מס נטו (אחרי זיכויים)" value={r.calculation.net_tax} bold />
+                  <ResultRow label="מס שנוכה ממשכורת (סעיף 84)" value={r.calculation.total_withheld} negative />
+                  <ResultRow label="ניכוי ריבית/דיבידנד (סעיף 85)" value={r.withholdings.field_043} negative />
+                  <ResultRow label="ניכוי מהכנסות אחרות (סעיף 87)" value={r.withholdings.field_040} negative />
+                  <ResultRow label="מס שבח (סעיף 88)" value={r.withholdings.field_041} negative />
+                  <ResultRow label="מקדמות מדוח שנתי" value={r.withholdings.field_tax_advance} negative />
+                  <ResultRow label="מס שכירות ששולם" value={r.withholdings.field_220} negative />
+                  <ResultRow label="סה״כ ששולם" value={r.calculation.total_paid} bold negative />
                   <tr className="border-t-2 border-foreground">
                     <td className="py-2 font-bold text-base">
                       {balance > 0 ? 'יתרה לתשלום' : 'החזר מס'}
                     </td>
                     <td className={cn(
                       'py-2 text-left font-bold text-base',
-                      balance > 0 ? 'text-red-600' : 'text-green-600'
+                      balance > 0 ? 'text-red-600' : 'text-green-600',
                     )}>
                       {formatNIS(Math.abs(balance))}
                     </td>
@@ -1129,7 +1953,30 @@ export function Form1301Page() {
             </Card>
           )}
 
-          {/* Source documents */}
+          <Card>
+            <CardHeader>
+              <CardTitle>השלמות ובדיקות מומלצות</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {advisorItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className={cn(
+                      'rounded-lg border px-3 py-2',
+                      item.level === 'missing' && 'border-red-200 bg-red-50',
+                      item.level === 'warn' && 'border-yellow-200 bg-yellow-50',
+                      item.level === 'info' && 'border-blue-200 bg-blue-50',
+                    )}
+                  >
+                    <div className="font-medium text-[#1a3a5c]">{item.title}</div>
+                    <div className="mt-1 text-sm text-[#4f6279]">{item.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           {r.source_documents.length > 0 && (
             <p className="text-xs text-muted-foreground">
               מקור: {r.source_documents.join(', ')}
@@ -1137,41 +1984,16 @@ export function Form1301Page() {
           )}
         </div>
       )}
+
+      <FloatingChat ref={chatRef} snapshot={chatSnapshot} />
     </div>
   )
 }
 
-// --- Helper Components ---
+// --- Helper Component ---
 
-function InputField({
-  label, id, value, onChange, placeholder, step,
-}: {
-  label: string; id: string; value: string
-  onChange: (id: string, val: string) => void
-  placeholder?: string; step?: string
-}) {
-  return (
-    <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs">{label}</Label>
-      <Input
-        id={id}
-        type="number"
-        step={step || '1'}
-        placeholder={placeholder || '0'}
-        value={value}
-        onChange={(e) => onChange(id, e.target.value)}
-        className="h-8 text-sm"
-      />
-    </div>
-  )
-}
-
-function Row({
-  label,
-  value,
-  bold,
-  highlight,
-  negative,
+function ResultRow({
+  label, value, bold, highlight, negative,
 }: {
   label: string
   value: number

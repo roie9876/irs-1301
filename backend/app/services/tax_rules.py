@@ -35,6 +35,9 @@ class TaxYearRules:
     pension_credit_income_ceiling: float  # Max annual insured income for 45a credit
     # Social insurance ceilings
     nii_max_insured_income: float  # Max monthly insured income for NII
+    # Shift work credit
+    shift_work_employer_income_ceiling: float
+    shift_work_max_credit: float
 
 
 TAX_RULES: dict[int, TaxYearRules] = {
@@ -63,6 +66,8 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=130_488,
         nii_max_insured_income=45_075,
+        shift_work_employer_income_ceiling=131_520,
+        shift_work_max_credit=11_520,
     ),
     2023: TaxYearRules(
         year=2023,
@@ -89,6 +94,8 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=146_200,
         nii_max_insured_income=47_465,
+        shift_work_employer_income_ceiling=138_480,
+        shift_work_max_credit=12_120,
     ),
     2024: TaxYearRules(
         year=2024,
@@ -115,6 +122,8 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=150_696,
         nii_max_insured_income=49_030,
+        shift_work_employer_income_ceiling=143_040,
+        shift_work_max_credit=12_540,
     ),
     2025: TaxYearRules(
         year=2025,
@@ -141,6 +150,8 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=150_696,
         nii_max_insured_income=49_030,  # Same as 2024
+        shift_work_employer_income_ceiling=143_040,
+        shift_work_max_credit=12_540,
     ),
 }
 
