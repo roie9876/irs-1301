@@ -22,9 +22,9 @@ FORM_106_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מט
 - employer_name: שם המעסיק (טקסט)
 - employer_id: מספר חברה — 9 ספרות (טקסט). זה השדה "חברה:" ולא "תיק ניכויים"
 - tax_year: שנת מס (מספר)
-- gross_salary: סה"כ משכורת + שווי הטבה בשדה 158/172 בלבד (מספר). חשוב: זה סכום שורות 158/172 בלבד, לא כולל שורת "רווח הון" ולא כולל שורת "סה"כ התשלום ברוטו"
+- gross_salary: "משכורת חייבת במס" — הסכום הכולל של כל הרכיבים החייבים במס (מספר). חשוב: אם מופיעים גם "הכנסה חייבת רגילה" וגם "משכורת חייבת במס" — קח את "משכורת חייבת במס" כי הוא כולל גם החזר הוצאות וחלק חייב בפיצויים. אם אין שדה "משכורת חייבת במס" אבל יש כמה שורות עם סעיף 158/172 (למשל "משכורת" ו"שווי הטבה") — סכום אותן. אל תיקח את "סה"כ התשלום ברוטו" כי הוא כולל גם תשלומים פטורים
 - tax_withheld: מס הכנסה שנוכה - סעיף 042 (מספר)
-- pension_employer: הפרשות לקופ"ג לקצבה, לרבות מרכיב פיצויים - שדה 249/248 (מספר)
+- pension_employer: הפרשות לקופ"ג לקצבה, לרבות מרכיב פיצויים - שדה 249/248 (מספר). חשוב: אם מופיעים גם "הפרשת מעסיק לקופת גמל לקצבה" וגם "סך הפרשות מעסיק לקצבה" — קח את "סך הפרשות מעסיק לקצבה" כי הוא כולל גם את מרכיב הפיצויים
 - pension_employee: ניכוי לקופות גמל לקצבה כ"עמית שכיר" - שדה 086/045 (מספר)
 - insured_income: השכר המבוטח לקופ"ג לקצבה - שדה 245/244 (מספר)
 - convalescence_pay: מחיר יום ההבראה שהופחת משכר העובד - שדה 012/011 (מספר)
@@ -33,6 +33,8 @@ FORM_106_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מט
 - national_insurance: דמי ביטוח לאומי (מספר)
 - health_insurance: דמי ביטוח בריאות (מספר)
 - donations: תרומות למוסדות ציבור - שדה 237/037 (מספר)
+- life_insurance: ביטוח חיים — סכום הניכוי לביטוח חיים (מספר, 0 אם לא קיים)
+- capital_gains_102: רווח הון מניירות ערך לפי סעיף 102 לפקודה (מספר, 0 אם לא קיים). זו שורה שמופיעה בטופס 106 עם המילים "רווח הון" ו"סעיף 102"
 
 כל שדה צריך להיות אובייקט עם:
 - value: הערך שחולץ (מספר או טקסט, null אם לא נמצא)
@@ -75,7 +77,7 @@ DOCUMENT_CLASSIFIER_PROMPT = """אתה מומחה לזיהוי סוגי טפסי
 בהינתן הטקסט הבא שחולץ מ-PDF, זהה את סוג המסמך.
 
 הסוגים האפשריים:
-- "form_106": טופס 106 — אישור שנתי מהמעסיק על הכנסות ומס שנוכה
+- "form_106": טופס 106 — אישור שנתי מהמעסיק על הכנסות ומס שנוכה. גם טופס 76 (השם הישן) הוא form_106. כל מסמך שמכיל פירוט משכורת, ניכוי מס, הפרשות לקופות גמל ונקודות זיכוי מהמעסיק — סווג כ-form_106
 - "form_867": טופס 867 — אישור ניכוי מס במקור על דיבידנד וריבית מניירות ערך
 - "rental_payment": אישור תשלום מס על הכנסות משכירות למגורים (10%)
 - "annual_summary": דוח שנתי על מכירת מניות/אופציות (Annual Sales Report)
@@ -268,3 +270,95 @@ async def extract_annual_summary_data(raw_text: str) -> dict:
 async def extract_receipt_data(raw_text: str) -> dict:
     """Extract receipt/invoice data (e.g., CPA fee)."""
     return await _llm_extract(RECEIPT_EXTRACTION_PROMPT, raw_text)
+
+
+ID_SUPPLEMENT_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מספח תעודת זהות ישראלית.
+חלץ את כל הפרטים מהתמונה והחזר JSON בלבד.
+
+השדות לחילוץ:
+- holder_name: שם בעל התעודה (טקסט)
+- holder_id: מספר תעודת זהות של בעל התעודה (טקסט)
+- spouse_name: שם בן/בת הזוג (טקסט, null אם לא נשוי)
+- spouse_id: מספר ת.ז. של בן/בת הזוג (טקסט, null אם לא נשוי)
+- holder_gender: מין בעל התעודה — "male" אם כתוב "זכר" או "male", או "female" אם כתוב "נקבה" או "female"
+- children: רשימה של כל הילדים המופיעים בספח
+
+כל שדה (חוץ מ-children) צריך להיות אובייקט עם:
+- value: הערך שחולץ (טקסט, null אם לא נמצא)
+- confidence: ציון ביטחון 0.0-1.0
+
+children הוא מערך של אובייקטים, כל אחד עם:
+- name: שם הילד/ה (טקסט)
+- id_number: מספר ת.ז. של הילד/ה (טקסט)
+- birth_date: תאריך לידה בפורמט DD.MM.YYYY (אם מופיע בתאריך עברי, המר ללועזי)
+- birth_year: שנת לידה (מספר)
+
+חשוב: הספח כולל תאריכים בעברית (כ"ג באב תשע"ז וכד'). המר אותם לתאריכים לועזיים.
+אם לא ניתן לקרוא את הפרטים, החזר מערך ריק.
+
+דוגמה:
+{
+  "holder_name": {"value": "כהן ישראל", "confidence": 0.95},
+  "holder_id": {"value": "123456789", "confidence": 0.98},
+  "spouse_name": {"value": "כהן רחל", "confidence": 0.95},
+  "spouse_id": {"value": "987654321", "confidence": 0.95},
+  "holder_gender": {"value": "male", "confidence": 0.99},
+  "children": [
+    {"name": "כהן דן", "id_number": "111222333", "birth_date": "15.03.2015", "birth_year": 2015},
+    {"name": "כהן נועה", "id_number": "444555666", "birth_date": "20.08.2018", "birth_year": 2018}
+  ]
+}
+"""
+
+
+async def extract_id_supplement_data(image_bytes: bytes, filename: str) -> dict:
+    """Extract data from Israeli ID supplement (ספח) using vision model."""
+    import base64
+
+    load_dotenv(ENV_PATH, override=True)
+
+    provider = os.getenv("LLM_PROVIDER", "")
+    model = os.getenv("LLM_MODEL", "")
+    api_key = os.getenv("LLM_API_KEY", "")
+    api_base = os.getenv("AZURE_API_BASE", "")
+
+    if not all([provider, model, api_key]):
+        raise ValueError("LLM not configured")
+
+    prefix = PROVIDER_PREFIX.get(provider)
+    if prefix is None:
+        raise ValueError(f"ספק לא מוכר: {provider}")
+
+    llm_model = f"{prefix}{model}"
+
+    # Determine MIME type
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+    mime_type = mime_map.get(ext, "image/jpeg")
+
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+    kwargs: dict = {
+        "model": llm_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": ID_SUPPLEMENT_EXTRACTION_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
+                    },
+                ],
+            }
+        ],
+        "api_key": api_key,
+        "response_format": {"type": "json_object"},
+        "max_tokens": 2000,
+    }
+    if provider == "azure" and api_base:
+        kwargs["api_base"] = api_base
+
+    response = await litellm.acompletion(**kwargs)
+    content = response.choices[0].message.content
+    return json.loads(content)

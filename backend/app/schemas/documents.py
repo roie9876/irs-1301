@@ -6,6 +6,14 @@ class FieldValue(BaseModel):
     confidence: float = 0.0
 
 
+class ChildInfo(BaseModel):
+    """A single child entry from ID supplement."""
+    name: str = ""
+    id_number: str = ""
+    birth_date: str = ""  # DD.MM.YYYY
+    birth_year: int = 0
+
+
 class Form106Extraction(BaseModel):
     employer_name: FieldValue = FieldValue()
     employer_id: FieldValue = FieldValue()
@@ -21,6 +29,8 @@ class Form106Extraction(BaseModel):
     national_insurance: FieldValue = FieldValue()
     health_insurance: FieldValue = FieldValue()
     donations: FieldValue = FieldValue()
+    life_insurance: FieldValue = FieldValue()
+    capital_gains_102: FieldValue = FieldValue()
 
 
 class Form867Extraction(BaseModel):
@@ -79,6 +89,16 @@ class RentalExcelExtraction(BaseModel):
     tax_amount: FieldValue = FieldValue()
 
 
+class IdSupplementExtraction(BaseModel):
+    """Extracted data from Israeli ID supplement (ספח תעודת זהות)."""
+    holder_name: FieldValue = FieldValue()
+    holder_id: FieldValue = FieldValue()
+    spouse_name: FieldValue = FieldValue()
+    spouse_id: FieldValue = FieldValue()
+    holder_gender: FieldValue = FieldValue()  # "male" or "female"
+    children: list[ChildInfo] = []
+
+
 # Map of document type to extraction model
 EXTRACTION_MODELS = {
     "form_106": Form106Extraction,
@@ -87,6 +107,7 @@ EXTRACTION_MODELS = {
     "annual_summary": AnnualSummaryExtraction,
     "receipt": ReceiptExtraction,
     "rental_excel": RentalExcelExtraction,
+    "id_supplement": IdSupplementExtraction,
 }
 
 

@@ -6,10 +6,12 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.schemas.documents import (
     EXTRACTION_MODELS,
+    ChildInfo,
     DocumentInfo,
     DocumentListResponse,
     FieldValue,
     Form106Extraction,
+    IdSupplementExtraction,
     UpdateFieldsRequest,
     UploadResponse,
     UploadResult,
@@ -21,6 +23,7 @@ from app.services.llm import (
     extract_rental_payment_data,
     extract_annual_summary_data,
     extract_receipt_data,
+    extract_id_supplement_data,
 )
 from app.services.pdf import EncryptedPdfError, extract_text_from_pdf
 from app.services.excel import extract_rental_excel
@@ -85,12 +88,13 @@ async def upload_documents(
 
         is_pdf = filename.lower().endswith(".pdf")
         is_xlsx = filename.lower().endswith(".xlsx")
+        is_image = filename.lower().rsplit(".", 1)[-1] in ("jpg", "jpeg", "png", "webp") if "." in filename.lower() else False
 
-        if not is_pdf and not is_xlsx:
+        if not is_pdf and not is_xlsx and not is_image:
             results.append(UploadResult(
                 filename=filename,
                 status="error",
-                error="הקובץ אינו PDF או Excel תקין",
+                error="הקובץ אינו PDF, Excel או תמונה תקינה",
             ))
             continue
 
@@ -128,6 +132,46 @@ async def upload_documents(
                     for k, v in extracted_data.items()
                     if k in model_cls.model_fields
                 })
+
+                sidecar_path = DOCUMENTS_DIR / f"{safe_name}{SIDECAR_SUFFIX}"
+                sidecar = {
+                    "doc_id": doc_id,
+                    "original_filename": filename,
+                    "document_type": doc_type,
+                    "extracted": extraction_obj.model_dump(),
+                    "user_corrected": False,
+                }
+                sidecar_path.write_text(
+                    json.dumps(sidecar, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+
+                results.append(UploadResult(
+                    filename=filename,
+                    doc_id=doc_id,
+                    status="success",
+                    document_type=doc_type,
+                    extracted=extraction_obj.model_dump(),
+                ))
+                continue
+
+            if is_image:
+                # Image files: treat as ID supplement (ספח תעודת זהות)
+                doc_type = "id_supplement"
+                extracted_data = await extract_id_supplement_data(content, filename)
+
+                # Build children list from extracted data
+                children_raw = extracted_data.pop("children", [])
+                children = [ChildInfo(**c) for c in children_raw if isinstance(c, dict)]
+
+                extraction_obj = IdSupplementExtraction(
+                    **{
+                        k: FieldValue(**v) if isinstance(v, dict) else FieldValue()
+                        for k, v in extracted_data.items()
+                        if k in IdSupplementExtraction.model_fields and k != "children"
+                    },
+                    children=children,
+                )
 
                 sidecar_path = DOCUMENTS_DIR / f"{safe_name}{SIDECAR_SUFFIX}"
                 sidecar = {

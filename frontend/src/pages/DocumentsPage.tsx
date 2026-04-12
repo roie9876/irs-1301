@@ -150,7 +150,7 @@ export function DocumentsPage() {
   const handleFiles = useCallback(async (files: File[], filePasswords?: Record<string, string>) => {
     const supportedFiles = files.filter((f) => {
       const name = f.name.toLowerCase()
-      return name.endsWith('.pdf') || name.endsWith('.xlsx')
+      return name.endsWith('.pdf') || name.endsWith('.xlsx') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') || name.endsWith('.webp')
     })
     if (supportedFiles.length === 0) return
 
@@ -304,13 +304,13 @@ export function DocumentsPage() {
           <Upload className="h-10 w-10 text-muted-foreground" />
         )}
         <div>
-          <p className="text-lg font-medium">גרור קבצי PDF או Excel לכאן או לחץ לבחירה</p>
-          <p className="text-sm text-muted-foreground">טופס 106, 867, אישור תשלום שכירות, קבלת רו"ח, חישוב שכירות (xlsx) • ניתן להעלות מספר קבצים</p>
+          <p className="text-lg font-medium">גרור קבצי PDF, Excel או תמונה לכאן או לחץ לבחירה</p>
+          <p className="text-sm text-muted-foreground">טופס 106, 867, אישור תשלום שכירות, קבלת רו"ח, חישוב שכירות (xlsx), ספח ת.ז. (תמונה) • ניתן להעלות מספר קבצים</p>
         </div>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.xlsx"
+          accept=".pdf,.xlsx,.jpg,.jpeg,.png,.webp"
           multiple
           className="hidden"
           onChange={(e) => {

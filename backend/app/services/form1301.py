@@ -127,6 +127,8 @@ def aggregate_form106(docs: list[DocumentInfo]) -> dict[str, float]:
         "national_insurance": 0,
         "health_insurance": 0,
         "donations": 0,
+        "life_insurance": 0,
+        "capital_gains_102": 0,
     }
 
     for doc in docs:
@@ -141,6 +143,8 @@ def aggregate_form106(docs: list[DocumentInfo]) -> dict[str, float]:
         totals["national_insurance"] += _fv(ext.get("national_insurance", {}))
         totals["health_insurance"] += _fv(ext.get("health_insurance", {}))
         totals["donations"] += _fv(ext.get("donations", {}))
+        totals["life_insurance"] += _fv(ext.get("life_insurance", {}))
+        totals["capital_gains_102"] += _fv(ext.get("capital_gains_102", {}))
 
     return totals
 
@@ -221,19 +225,68 @@ def aggregate_annual_summary(documents: list[DocumentInfo]) -> dict[str, float]:
     return totals
 
 
-def compute_pension_credit(pension_employer: float, insured_income: float, rules) -> float:
-    """Compute pension contribution credit (35% of qualifying amount).
+def compute_pension_employee_credit(pension_employee: float, insured_income: float, rules) -> float:
+    """Compute section 45a credit for employee pension deposits (section 75).
 
-    Credit is 35% of employer pension contribution, up to 7% of insured income.
+    Formula: 35% × min(deposits, 7% × min(insured_income, ceiling))
+    For salaried employees, the ceiling is year-specific (average wage × 12).
     """
-    max_qualifying = insured_income * rules.max_pension_deduction_pct
-    qualifying = min(pension_employer, max_qualifying)
+    max_qualifying = rules.max_pension_deduction_pct * min(insured_income, rules.pension_credit_income_ceiling)
+    qualifying = min(pension_employee, max_qualifying)
     return round(qualifying * 0.35)
 
 
-def compute_pension_employee_credit(pension_employee: float) -> float:
-    """Compute credit for employee pension deposits (section 75 — 35%)."""
-    return round(pension_employee * 0.35)
+def compute_children_credit_points(
+    children_birth_years: list[int],
+    tax_year: int,
+    is_woman: bool,
+) -> float:
+    """Compute credit points for children based on birth years.
+
+    Israeli tax law (section 40):
+    - Each parent: 1 credit point per child under 18 at end of tax year
+    - Woman: additional 1 credit point per child under 18
+    """
+    points = 0.0
+    for birth_year in children_birth_years:
+        age = tax_year - birth_year
+        if 0 <= age <= 17:
+            points += 1.0
+            if is_woman:
+                points += 1.0
+    return points
+
+
+def aggregate_id_supplement(documents: list[DocumentInfo]) -> dict:
+    """Extract children info and gender from ID supplement documents."""
+    result: dict = {
+        "children_birth_years": [],
+        "holder_gender": "",
+        "holder_name": "",
+        "spouse_name": "",
+    }
+
+    for doc in documents:
+        if doc.document_type != "id_supplement":
+            continue
+        ext = doc.extracted
+        children = ext.get("children", [])
+        for child in children:
+            if isinstance(child, dict):
+                by = child.get("birth_year", 0)
+                if isinstance(by, int) and 1990 < by < 2030:
+                    result["children_birth_years"].append(by)
+        gender_field = ext.get("holder_gender", {})
+        if isinstance(gender_field, dict):
+            result["holder_gender"] = str(gender_field.get("value", "")).lower()
+        name_field = ext.get("holder_name", {})
+        if isinstance(name_field, dict):
+            result["holder_name"] = str(name_field.get("value", ""))
+        sp_field = ext.get("spouse_name", {})
+        if isinstance(sp_field, dict):
+            result["spouse_name"] = str(sp_field.get("value", ""))
+
+    return result
 
 
 def compute_form1301(
@@ -381,6 +434,30 @@ def compute_form1301(
         donation_taxpayer = tp["donations"]
     if donation_spouse == 0 and sp["donations"] > 0:
         donation_spouse = sp["donations"]
+
+    # Auto-populate life insurance from 106
+    if life_insurance_taxpayer == 0 and tp["life_insurance"] > 0:
+        life_insurance_taxpayer = tp["life_insurance"]
+    if life_insurance_spouse == 0 and sp["life_insurance"] > 0:
+        life_insurance_spouse = sp["life_insurance"]
+
+    # Auto-populate capital gains (102) from 106 → dividend 25%
+    if tp["capital_gains_102"] > 0:
+        dividend_25_taxpayer += tp["capital_gains_102"]
+    if sp["capital_gains_102"] > 0:
+        dividend_25_spouse += sp["capital_gains_102"]
+
+    # Auto-populate children credit points from ID supplement (ספח)
+    id_supp = aggregate_id_supplement(all_docs)
+    if id_supp["children_birth_years"] and children_credit_points_taxpayer == 0 and children_credit_points_spouse == 0:
+        # Determine who is the woman: if holder is male, spouse is the woman
+        holder_is_woman = id_supp["holder_gender"] == "female"
+        children_credit_points_taxpayer = compute_children_credit_points(
+            id_supp["children_birth_years"], year, is_woman=holder_is_woman,
+        )
+        children_credit_points_spouse = compute_children_credit_points(
+            id_supp["children_birth_years"], year, is_woman=not holder_is_woman,
+        )
 
     # Auto-populate pension_employee credit from 106
     if pension_employee_credit_taxpayer == 0 and tp["pension_employee"] > 0:
@@ -620,33 +697,56 @@ def compute_form1301(
         + surtax
     )
 
-    # === Credits ===
+    # === Credits (per-person with capping — חישוב נפרד) ===
     cp_amount_tp = round(credit_points_taxpayer * rules.credit_point_value)
     cp_amount_sp = round(credit_points_spouse * rules.credit_point_value)
 
-    pension_credit_tp = compute_pension_credit(tp["pension_employer"], tp["insured_income"], rules)
-    pension_credit_sp = compute_pension_credit(sp["pension_employer"], sp["insured_income"], rules)
-
-    pension_emp_credit_tp = compute_pension_employee_credit(pension_employee_credit_taxpayer)
-    pension_emp_credit_sp = compute_pension_employee_credit(pension_employee_credit_spouse)
-
-    all_donations = donation_taxpayer + donation_spouse + donation_us_taxpayer + donation_us_spouse
-    donation_credit = round(all_donations * 0.35)
-
-    all_insurance = (
-        life_insurance_taxpayer + life_insurance_spouse
-        + survivors_insurance_taxpayer + survivors_insurance_spouse
+    pension_emp_credit_tp = compute_pension_employee_credit(
+        pension_employee_credit_taxpayer, tp["insured_income"], rules
     )
-    life_ins_credit = round(all_insurance * 0.25)
-
-    total_credits = (
-        cp_amount_tp + cp_amount_sp
-        + pension_credit_tp + pension_credit_sp
-        + pension_emp_credit_tp + pension_emp_credit_sp
-        + donation_credit + life_ins_credit
+    pension_emp_credit_sp = compute_pension_employee_credit(
+        pension_employee_credit_spouse, sp["insured_income"], rules
     )
 
-    net_tax = max(0, gross_tax - total_credits)
+    # Donation credit — split proportionally by donator
+    donation_tp = donation_taxpayer + donation_us_taxpayer
+    donation_sp = donation_spouse + donation_us_spouse
+    donation_credit_tp = round(donation_tp * 0.35)
+    donation_credit_sp = round(donation_sp * 0.35)
+    donation_credit = donation_credit_tp + donation_credit_sp
+
+    # Life insurance credit (25%) — per person
+    life_ins_credit_tp = round((life_insurance_taxpayer + survivors_insurance_taxpayer) * 0.25)
+    life_ins_credit_sp = round((life_insurance_spouse + survivors_insurance_spouse) * 0.25)
+
+    # Section 76 credit — self-employed pension (35% of deposits)
+    pension_self_credit_tp = round(pension_self_credit_taxpayer * 0.35)
+    pension_self_credit_sp = round(pension_self_credit_spouse * 0.35)
+
+    # Per-person credit totals
+    total_credits_tp = (
+        cp_amount_tp + pension_emp_credit_tp + pension_self_credit_tp
+        + donation_credit_tp + life_ins_credit_tp
+    )
+    total_credits_sp = (
+        cp_amount_sp + pension_emp_credit_sp + pension_self_credit_sp
+        + donation_credit_sp + life_ins_credit_sp
+    )
+    total_credits = total_credits_tp + total_credits_sp
+
+    # Per-person gross tax for capping
+    # Taxpayer gets: their progressive tax + ALL special-rate taxes + surtax
+    # (capital/rental income is typically the taxpayer's)
+    gross_tax_tp = (
+        tax_regular_tp
+        + tax_15 + tax_20 + tax_25 + tax_30 + tax_31 + tax_35
+        + tax_rental + tax_capital
+        + surtax_tp
+    )
+    gross_tax_sp = tax_regular_sp + surtax_sp
+
+    # Net tax: credits capped per person (excess credits are lost)
+    net_tax = max(0, gross_tax_tp - total_credits_tp) + max(0, gross_tax_sp - total_credits_sp)
 
     total_paid = (
         tp["tax_withheld"] + sp["tax_withheld"]
@@ -672,13 +772,16 @@ def compute_form1301(
         gross_tax=gross_tax,
         credit_points_amount_taxpayer=cp_amount_tp,
         credit_points_amount_spouse=cp_amount_sp,
-        pension_credit_taxpayer=pension_credit_tp,
-        pension_credit_spouse=pension_credit_sp,
         pension_employee_credit_taxpayer=pension_emp_credit_tp,
         pension_employee_credit_spouse=pension_emp_credit_sp,
         donation_credit=donation_credit,
-        life_insurance_credit=life_ins_credit,
+        life_insurance_credit_taxpayer=life_ins_credit_tp,
+        life_insurance_credit_spouse=life_ins_credit_sp,
+        total_credits_taxpayer=total_credits_tp,
+        total_credits_spouse=total_credits_sp,
         total_credits=total_credits,
+        gross_tax_taxpayer=gross_tax_tp,
+        gross_tax_spouse=gross_tax_sp,
         net_tax=net_tax,
         total_withheld=tp["tax_withheld"] + sp["tax_withheld"],
         total_paid=total_paid,

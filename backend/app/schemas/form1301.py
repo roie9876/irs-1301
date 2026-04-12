@@ -222,13 +222,18 @@ class TaxCalculation(BaseModel):
     # Credits
     credit_points_amount_taxpayer: float = 0
     credit_points_amount_spouse: float = 0
-    pension_credit_taxpayer: float = 0
-    pension_credit_spouse: float = 0
     pension_employee_credit_taxpayer: float = 0  # סעיף 75
     pension_employee_credit_spouse: float = 0
+    life_insurance_credit_taxpayer: float = 0  # סעיף 73
+    life_insurance_credit_spouse: float = 0
     donation_credit: float = 0
-    life_insurance_credit: float = 0
+    total_credits_taxpayer: float = 0
+    total_credits_spouse: float = 0
     total_credits: float = 0
+
+    # Per-person gross tax (for separate-calculation capping)
+    gross_tax_taxpayer: float = 0
+    gross_tax_spouse: float = 0
 
     # Net
     net_tax: float = 0

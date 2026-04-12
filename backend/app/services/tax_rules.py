@@ -31,6 +31,8 @@ class TaxYearRules:
     max_pension_deduction_pct: float  # Max % of income for pension deduction
     max_education_fund_deduction_employer_pct: float  # 7.5%
     max_education_fund_deduction_employee_pct: float  # 2.5%
+    # Pension credit (section 45a)
+    pension_credit_income_ceiling: float  # Max annual insured income for 45a credit
     # Social insurance ceilings
     nii_max_insured_income: float  # Max monthly insured income for NII
 
@@ -59,6 +61,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_pension_deduction_pct=0.07,
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
+        pension_credit_income_ceiling=130_488,
         nii_max_insured_income=45_075,
     ),
     2023: TaxYearRules(
@@ -84,6 +87,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_pension_deduction_pct=0.07,
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
+        pension_credit_income_ceiling=140_556,
         nii_max_insured_income=47_465,
     ),
     2024: TaxYearRules(
@@ -109,6 +113,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_pension_deduction_pct=0.07,
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
+        pension_credit_income_ceiling=150_696,
         nii_max_insured_income=49_030,
     ),
     2025: TaxYearRules(
@@ -134,6 +139,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_pension_deduction_pct=0.07,
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
+        pension_credit_income_ceiling=150_696,
         nii_max_insured_income=49_030,  # Same as 2024
     ),
 }

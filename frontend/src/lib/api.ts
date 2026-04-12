@@ -210,13 +210,16 @@ export interface TaxCalculation {
   gross_tax: number
   credit_points_amount_taxpayer: number
   credit_points_amount_spouse: number
-  pension_credit_taxpayer: number
-  pension_credit_spouse: number
   pension_employee_credit_taxpayer: number
   pension_employee_credit_spouse: number
   donation_credit: number
-  life_insurance_credit: number
+  life_insurance_credit_taxpayer: number
+  life_insurance_credit_spouse: number
+  total_credits_taxpayer: number
+  total_credits_spouse: number
   total_credits: number
+  gross_tax_taxpayer: number
+  gross_tax_spouse: number
   net_tax: number
   total_withheld: number
   total_paid: number

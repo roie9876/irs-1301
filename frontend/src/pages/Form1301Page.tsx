@@ -1049,12 +1049,13 @@ export function Form1301Page() {
                 <tbody>
                   <Row label="נקודות זיכוי — נישום" value={r.calculation.credit_points_amount_taxpayer} negative />
                   <Row label="נקודות זיכוי — בן/בת זוג" value={r.calculation.credit_points_amount_spouse} negative />
-                  <Row label="זיכוי פנסיה (מעביד) — נישום" value={r.calculation.pension_credit_taxpayer} negative />
-                  <Row label="זיכוי פנסיה (מעביד) — בן/בת זוג" value={r.calculation.pension_credit_spouse} negative />
-                  <Row label="זיכוי פנסיה (עובד) — נישום" value={r.calculation.pension_employee_credit_taxpayer} negative />
-                  <Row label="זיכוי פנסיה (עובד) — בן/בת זוג" value={r.calculation.pension_employee_credit_spouse} negative />
+                  <Row label="זיכוי פנסיה 45א — נישום" value={r.calculation.pension_employee_credit_taxpayer} negative />
+                  <Row label="זיכוי פנסיה 45א — בן/בת זוג" value={r.calculation.pension_employee_credit_spouse} negative />
                   <Row label="זיכוי תרומות (35%)" value={r.calculation.donation_credit} negative />
-                  <Row label="זיכוי ביטוח חיים (25%)" value={r.calculation.life_insurance_credit} negative />
+                  <Row label="זיכוי ביטוח חיים — נישום" value={r.calculation.life_insurance_credit_taxpayer} negative />
+                  <Row label="זיכוי ביטוח חיים — בן/בת זוג" value={r.calculation.life_insurance_credit_spouse} negative />
+                  <Row label="סה״כ זיכויים נישום" value={r.calculation.total_credits_taxpayer} negative />
+                  <Row label="סה״כ זיכויים בן/בת זוג" value={r.calculation.total_credits_spouse} negative />
                   <Row label="סה״כ זיכויים" value={r.calculation.total_credits} bold negative />
                 </tbody>
               </table>
