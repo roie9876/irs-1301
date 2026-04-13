@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Calculator, AlertTriangle, TrendingDown, TrendingUp,
-  Loader2, FileText, CheckCircle2, Save,
+  Loader2, FileText, CheckCircle2, Save, MessageCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -159,7 +159,6 @@ interface CellDef {
   code: string
   resultKey: string
   inputKey?: string
-  source?: string
   placeholder?: string
   step?: string
 }
@@ -191,7 +190,10 @@ type SavedDraft = {
   generalForm: Record<string, string>
   inputs: Record<string, string>
   savedAt: string
+  draftVersion?: number
 }
+
+const DRAFT_VERSION = 2
 
 const IRS_SECTIONS: IRSSection[] = [
   // ===== ג — הכנסות חייבות בשיעורי מס רגילים =====
@@ -216,8 +218,8 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 4, description: 'הכנסה ממשכורת',
-        taxpayer: { code: '158', resultKey: 'income.field_158', source: 'טופס 106' },
-        spouse: { code: '172', resultKey: 'income.field_172', source: 'טופס 106' },
+        taxpayer: { code: '158', resultKey: 'income.field_158' },
+        spouse: { code: '172', resultKey: 'income.field_172' },
       },
       {
         num: 5, description: 'עבודה במשמרות',
@@ -301,7 +303,7 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 14, description: 'דיבידנד — 25%',
-        taxpayer: { code: '141', resultKey: 'special_rate.field_141', inputKey: 'dividend_25_taxpayer', source: 'טופס 867', placeholder: 'אוטומטי מ-867' },
+        taxpayer: { code: '141', resultKey: 'special_rate.field_141', inputKey: 'dividend_25_taxpayer' },
         spouse: { code: '241', resultKey: 'special_rate.field_241', inputKey: 'dividend_25_spouse' },
       },
       {
@@ -321,12 +323,12 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 18, description: 'ריבית על פיקדונות/חסכונות — 25%',
-        taxpayer: { code: '142', resultKey: 'special_rate.field_142', inputKey: 'interest_deposits_25_taxpayer', source: 'טופס 867', placeholder: 'אוטומטי מ-867' },
+        taxpayer: { code: '142', resultKey: 'special_rate.field_142', inputKey: 'interest_deposits_25_taxpayer' },
         spouse: { code: '242', resultKey: 'special_rate.field_242', inputKey: 'interest_deposits_25_spouse' },
       },
       {
         num: 19, description: 'הכנסת שכר דירה למגורים — 10%',
-        taxpayer: { code: '222', resultKey: 'special_rate.field_222', inputKey: 'rental_10_taxpayer', source: 'Excel', placeholder: 'אוטומטי מ-Excel' },
+        taxpayer: { code: '222', resultKey: 'special_rate.field_222', inputKey: 'rental_10_taxpayer' },
         spouse: { code: '284', resultKey: 'special_rate.field_284', inputKey: 'rental_10_spouse' },
       },
       {
@@ -460,8 +462,8 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 32, description: 'משכורת לקרן השתלמות — שכיר',
-        taxpayer: { code: '218', resultKey: 'deductions.field_218', source: 'טופס 106' },
-        spouse: { code: '219', resultKey: 'deductions.field_219', source: 'טופס 106' },
+        taxpayer: { code: '218', resultKey: 'deductions.field_218' },
+        spouse: { code: '219', resultKey: 'deductions.field_219' },
       },
       {
         num: 33, description: 'הפקדה לקופת גמל — עמית עצמאי',
@@ -475,18 +477,18 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 35, description: 'הכנסה מבוטחת',
-        taxpayer: { code: '244', resultKey: 'deductions.field_244', source: 'טופס 106' },
-        spouse: { code: '245', resultKey: 'deductions.field_245', source: 'טופס 106' },
+        taxpayer: { code: '244', resultKey: 'deductions.field_244' },
+        spouse: { code: '245', resultKey: 'deductions.field_245' },
       },
       {
         num: 36, description: 'הפקדות מעביד לקופות גמל',
-        taxpayer: { code: '248', resultKey: 'deductions.field_248', source: 'טופס 106' },
-        spouse: { code: '249', resultKey: 'deductions.field_249', source: 'טופס 106' },
+        taxpayer: { code: '248', resultKey: 'deductions.field_248' },
+        spouse: { code: '249', resultKey: 'deductions.field_249' },
       },
       {
         num: 37, description: 'הפחתת דמי הבראה',
-        taxpayer: { code: '011', resultKey: 'deductions.field_011', source: 'טופס 106' },
-        spouse: { code: '012', resultKey: 'deductions.field_012', source: 'טופס 106' },
+        taxpayer: { code: '011', resultKey: 'deductions.field_011' },
+        spouse: { code: '012', resultKey: 'deductions.field_012' },
       },
     ],
   },
@@ -528,8 +530,8 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 43, description: 'הפרשות עובד לפנסיה — זיכוי 35%',
-        taxpayer: { code: '045', resultKey: 'tax_credits.field_045', source: 'טופס 106' },
-        spouse: { code: '086', resultKey: 'tax_credits.field_086', source: 'טופס 106' },
+        taxpayer: { code: '045', resultKey: 'tax_credits.field_045' },
+        spouse: { code: '086', resultKey: 'tax_credits.field_086' },
       },
       {
         num: 44, description: 'קצבה כעמית עצמאי',
@@ -543,7 +545,7 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 46, description: 'תרומות למוסדות מוכרים — 35%',
-        taxpayer: { code: '037', resultKey: 'tax_credits.field_037', inputKey: 'donation_taxpayer', source: 'טופס 106', placeholder: 'אוטומטי מ-106' },
+        taxpayer: { code: '037', resultKey: 'tax_credits.field_037', inputKey: 'donation_taxpayer' },
         spouse: { code: '237', resultKey: 'tax_credits.field_237', inputKey: 'donation_spouse' },
       },
       {
@@ -569,11 +571,11 @@ const IRS_SECTIONS: IRSSection[] = [
     rows: [
       {
         num: 50, description: 'מס שנוכה ממשכורת',
-        taxpayer: { code: '042', resultKey: 'withholdings.field_042', source: 'טופס 106' },
+        taxpayer: { code: '042', resultKey: 'withholdings.field_042' },
       },
       {
         num: 51, description: 'ניכוי במקור — ריבית ודיבידנד',
-        taxpayer: { code: '043', resultKey: 'withholdings.field_043', source: 'טופס 867' },
+        taxpayer: { code: '043', resultKey: 'withholdings.field_043' },
       },
       {
         num: 52, description: 'ניכוי מס מהכנסות אחרות',
@@ -585,11 +587,11 @@ const IRS_SECTIONS: IRSSection[] = [
       },
       {
         num: 54, description: 'מס שכירות ששולם',
-        taxpayer: { code: '220', resultKey: 'withholdings.field_220', inputKey: 'rental_tax_paid', source: 'אישור תשלום', placeholder: 'אוטומטי מאישור' },
+        taxpayer: { code: '220', resultKey: 'withholdings.field_220', inputKey: 'rental_tax_paid' },
       },
       {
         num: 55, description: 'מקדמות מדוח שנתי',
-        taxpayer: { code: '---', resultKey: 'withholdings.field_tax_advance', source: 'דוח שנתי' },
+        taxpayer: { code: '---', resultKey: 'withholdings.field_tax_advance' },
       },
     ],
   },
@@ -805,16 +807,7 @@ export function Form1301Page() {
   const [personalForm, setPersonalForm] = useState<Record<string, string>>({})
   const [generalForm, setGeneralForm] = useState<Record<string, string>>({})
 
-  const loadDocuments = useCallback(async () => {
-    try {
-      const data = await api<DocumentListResponse>('/documents')
-      setDocuments(data.documents)
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  const [inputs, setInputs] = useState<Record<string, string>>({
+  const BLANK_INPUTS: Record<string, string> = useMemo(() => ({
     // ג
     business_income_taxpayer: '', business_income_spouse: '',
     nii_self_employed_taxpayer: '', nii_self_employed_spouse: '',
@@ -877,7 +870,18 @@ export function Form1301Page() {
     // נוסף
     production_expenses_taxpayer: '', production_expenses_spouse: '',
     interest_cpi_adjustment: '',
-  })
+  }), [])
+
+  const [inputs, setInputs] = useState<Record<string, string>>(() => ({ ...BLANK_INPUTS }))
+
+  const loadDocuments = useCallback(async () => {
+    try {
+      const data = await api<DocumentListResponse>('/documents')
+      setDocuments(data.documents)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const saveDraft = useCallback(() => {
     try {
@@ -888,6 +892,7 @@ export function Form1301Page() {
         generalForm,
         inputs,
         savedAt,
+        draftVersion: DRAFT_VERSION,
       }
       window.localStorage.setItem(getDraftStorageKey(taxYear), JSON.stringify(draft))
       setDraftStatus('saved')
@@ -903,6 +908,14 @@ export function Form1301Page() {
   }, [loadDocuments, taxYear])
 
   useEffect(() => {
+    // Reset all form state when year changes — prevent cross-year contamination
+    setInputs({ ...BLANK_INPUTS })
+    setPersonalForm({})
+    setGeneralForm({})
+    setAutoFilled(new Set())
+    setResult(null)
+    setError('')
+
     try {
       const rawDraft = window.localStorage.getItem(getDraftStorageKey(taxYear))
       if (!rawDraft) {
@@ -911,6 +924,13 @@ export function Form1301Page() {
         return
       }
       const draft = JSON.parse(rawDraft) as Partial<SavedDraft>
+      if (draft.draftVersion !== DRAFT_VERSION) {
+        // Discard drafts from before the year-isolation fix
+        window.localStorage.removeItem(getDraftStorageKey(taxYear))
+        setDraftStatus('idle')
+        setDraftSavedAt('')
+        return
+      }
       if (draft.activeTab === 'personal' || draft.activeTab === 'general' || draft.activeTab === 'income') {
         setActiveTab(draft.activeTab)
       }
@@ -921,14 +941,14 @@ export function Form1301Page() {
         setGeneralForm(draft.generalForm)
       }
       if (draft.inputs && typeof draft.inputs === 'object') {
-        setInputs((prev) => ({ ...prev, ...draft.inputs }))
+        setInputs({ ...BLANK_INPUTS, ...draft.inputs })
       }
       setDraftStatus('restored')
       setDraftSavedAt(typeof draft.savedAt === 'string' ? draft.savedAt : '')
     } catch {
       setDraftStatus('error')
     }
-  }, [taxYear])
+  }, [taxYear, BLANK_INPUTS])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1023,20 +1043,27 @@ export function Form1301Page() {
       const data = await api<Form1301PreviewResponse>(`/form-1301/preview?${params}`)
       setResult(data)
       const eff = data.result.effective_inputs
-      if (eff && Object.keys(eff).length > 0) {
-        const filled = new Set<string>()
-        setInputs((prev) => {
-          const updated = { ...prev }
+      const filled = new Set<string>()
+      setInputs((prev) => {
+        const updated = { ...prev }
+        // Clear previously auto-filled fields that are no longer effective
+        for (const key of autoFilled) {
+          if (!eff || !(key in eff)) {
+            updated[key] = ''
+          }
+        }
+        // Apply new effective inputs
+        if (eff) {
           for (const [field, val] of Object.entries(eff)) {
             if (!updated[field] || updated[field] === '') {
               updated[field] = String(val)
               filled.add(field)
             }
           }
-          return updated
-        })
-        setAutoFilled(filled)
-      }
+        }
+        return updated
+      })
+      setAutoFilled(filled)
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'שגיאה בחישוב')
@@ -1070,6 +1097,23 @@ export function Form1301Page() {
     ? (r?.calculation.balance_after_interest ?? 0)
     : (r?.calculation.balance ?? 0)
 
+  // Build field code → Hebrew label map for the chat context
+  const fieldLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const section of GENERAL_INFO_SECTIONS) {
+      for (const row of section.rows) {
+        labels[row.code] = row.label
+      }
+    }
+    for (const section of IRS_SECTIONS) {
+      for (const row of section.rows) {
+        if (row.taxpayer) labels[row.taxpayer.inputKey ?? row.taxpayer.code] = row.description
+        if (row.spouse) labels[row.spouse.inputKey ?? row.spouse.code] = row.description + ' — בן/ת זוג'
+      }
+    }
+    return labels
+  }, [])
+
   const chatSnapshot: FormSnapshot = {
     taxYear,
     activeTab,
@@ -1080,6 +1124,7 @@ export function Form1301Page() {
     warnings: r?.warnings ?? [],
     balance,
     netTax: r?.calculation.net_tax ?? 0,
+    fieldLabels,
   }
 
   const renderCell = (cell: CellDef) => {
@@ -1111,7 +1156,7 @@ export function Form1301Page() {
         )
       }
     }
-    return <span className="text-[10px] text-gray-400 block truncate">{cell.source || ''}</span>
+    return null
   }
 
   const renderFieldCodeButton = (code?: string) => {
@@ -1829,6 +1874,21 @@ export function Form1301Page() {
                   </ul>
                 </div>
               ) : null}
+              {fieldHelp && !fieldHelpLoading && (
+                <button
+                  type="button"
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-[#2f658d] bg-[#f0f6fc] px-3 py-2 text-sm font-medium text-[#2f658d] hover:bg-[#ddeaf6] transition-colors"
+                  onClick={() => {
+                    setFieldHelpOpen(false)
+                    chatRef.current?.askAndSend(
+                      `הסבר לי בשפה פשוטה מה המשמעות של שדה ${fieldHelp.code} (${fieldHelp.title}), מתי ממלאים אותו, ומה כדאי לבדוק לפי הנתונים שלי.`
+                    )
+                  }}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  שאל את העוזר על שדה זה
+                </button>
+              )}
             </>
           )}
         </DialogContent>

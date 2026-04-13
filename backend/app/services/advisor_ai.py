@@ -5,6 +5,7 @@ import litellm
 from dotenv import load_dotenv
 
 from app.schemas.advisor import AdvisorQuestionRequest
+from app.services.field_help import _load_field_index
 from app.services.llm import ENV_PATH, PROVIDER_PREFIX
 
 
@@ -89,6 +90,22 @@ _GUIDES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "IRS_Docs"
 _guide_cache: dict[int, str] = {}
 
 
+def _build_field_dictionary() -> str:
+    """Build a compact code→title reference so the LLM knows every field."""
+    index = _load_field_index()
+    lines = []
+    for code in sorted(index, key=lambda c: c.zfill(4)):
+        entry = index[code]
+        title = entry.get("title", "")
+        part = entry.get("part_name_he", "")
+        if title:
+            line = f"{code}: {title}"
+            if part:
+                line += f" ({part})"
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def _load_guide(year: int) -> str:
     if year in _guide_cache:
         return _guide_cache[year]
@@ -101,9 +118,6 @@ def _load_guide(year: int) -> str:
     if not path.exists():
         return ""
     text = path.read_text(encoding="utf-8")
-    # Limit to ~15k chars to stay within context budget
-    if len(text) > 15000:
-        text = text[:15000] + "\n... (המדריך קוצר)"
     _guide_cache[year] = text
     return text
 
@@ -149,6 +163,7 @@ async def answer_chat_question(
     llm_model = f"{prefix}{model}"
 
     guide_excerpt = _load_guide(tax_year)
+    field_dict = _build_field_dictionary()
     document_lines = "\n".join(f"- {name}" for name in source_documents) or "- לא הועלו מסמכים"
     warning_lines = "\n".join(f"- {w}" for w in warnings) or "- אין אזהרות"
 
@@ -163,6 +178,10 @@ async def answer_chat_question(
 
 אזהרות:
 {warning_lines}
+
+--- מילון שדות: קוד → שם השדה ---
+{field_dict}
+--- סוף מילון שדות ---
 
 --- קטע מתוך המדריך הרשמי לשנת {tax_year} ---
 {guide_excerpt}
@@ -179,7 +198,7 @@ async def answer_chat_question(
             {"role": "user", "content": user_prompt},
         ],
         "api_key": api_key,
-        "max_tokens": 600,
+        "max_tokens": 1500,
         "timeout": 30,
     }
     if provider == "azure" and api_base:

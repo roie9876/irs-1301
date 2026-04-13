@@ -578,11 +578,14 @@ def compute_form1301(
     # Auto-populate from Form 867
     form867 = aggregate_form867(all_docs)
 
-    # Annual Sales Report (ESOP) — capital income goes to dividends
+    # Annual Sales Report (ESOP) — capital income goes to capital gains (field 139)
     annual_summary = aggregate_annual_summary(all_docs)
     if annual_summary["capital_income"] > 0:
-        if annual_summary["capital_income"] > dividend_25_taxpayer:
-            dividend_25_taxpayer = annual_summary["capital_income"]
+        if annual_summary["capital_income"] > capital_gains:
+            capital_gains = annual_summary["capital_income"]
+        # Clear stale dividend_25 if it was previously auto-filled with this amount
+        if dividend_25_taxpayer == annual_summary["capital_income"]:
+            dividend_25_taxpayer = 0
 
     # Auto-populate rental from xlsx
     if rental_10_taxpayer == 0:
@@ -612,15 +615,19 @@ def compute_form1301(
     if life_insurance_spouse == 0 and sp["life_insurance"] > 0:
         life_insurance_spouse = sp["life_insurance"]
 
-    # Auto-populate capital gains (102) from 106 → dividend 25%
-    # Only if annual_summary didn't already provide this income (same source)
-    if dividend_25_taxpayer == 0 and tp["capital_gains_102"] > 0:
-        dividend_25_taxpayer = tp["capital_gains_102"]
-    if dividend_25_spouse == 0 and sp["capital_gains_102"] > 0:
-        dividend_25_spouse = sp["capital_gains_102"]
+    # Auto-populate capital gains (102) from 106 → capital gains (field 139)
+    # This is "רווח הון מניירות ערך" from the 106, not a dividend
+    if capital_gains == 0 and tp["capital_gains_102"] > 0:
+        capital_gains += tp["capital_gains_102"]
+        # Clear stale dividend_25 if it was previously auto-filled with this amount
+        if dividend_25_taxpayer == tp["capital_gains_102"]:
+            dividend_25_taxpayer = 0
+    if capital_gains == 0 and sp["capital_gains_102"] > 0:
+        capital_gains += sp["capital_gains_102"]
+        if dividend_25_spouse == sp["capital_gains_102"]:
+            dividend_25_spouse = 0
 
-    # Only use 867 dividends/interest if capital_gains_102 didn't supply any
-    # (867 reports bank dividends taxed at final rate — CPA typically excludes them)
+    # Only use 867 dividends/interest if no manual entry
     if dividend_25_taxpayer == 0 and form867["dividend_income"] > 0:
         dividend_25_taxpayer = form867["dividend_income"]
     if interest_deposits_25_taxpayer == 0 and form867["interest_income"] > 0:

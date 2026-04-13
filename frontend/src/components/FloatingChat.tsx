@@ -18,6 +18,8 @@ export interface FormSnapshot {
   warnings: string[]
   balance: number
   netTax: number
+  /** code → Hebrew label, e.g. "150" → "הכנסה מעסק או משלח יד" */
+  fieldLabels?: Record<string, string>
 }
 
 export interface FloatingChatHandle {
@@ -64,12 +66,20 @@ export const FloatingChat = forwardRef<FloatingChatHandle, FloatingChatProps>(fu
 
     const generalEntries = Object.entries(snapshot.generalForm).filter(([, v]) => v && v !== '')
     if (generalEntries.length > 0) {
-      lines.push(`פרטים כלליים שמולאו: ${generalEntries.map(([k, v]) => `${k}=${v}`).join(', ')}`)
+      const labels = snapshot.fieldLabels ?? {}
+      lines.push(`פרטים כלליים שמולאו: ${generalEntries.map(([k, v]) => {
+        const label = labels[k]
+        return label ? `${k} (${label})=${v}` : `${k}=${v}`
+      }).join(', ')}`)
     }
 
     const incomeEntries = Object.entries(snapshot.inputs).filter(([, v]) => v && v !== '' && v !== '0')
     if (incomeEntries.length > 0) {
-      lines.push(`שדות הכנסה שמולאו: ${incomeEntries.map(([k, v]) => `${k}=${v}`).join(', ')}`)
+      const labels = snapshot.fieldLabels ?? {}
+      lines.push(`שדות הכנסה שמולאו: ${incomeEntries.map(([k, v]) => {
+        const label = labels[k]
+        return label ? `${k} (${label})=${v}` : `${k}=${v}`
+      }).join(', ')}`)
     }
 
     if (snapshot.balance !== 0) lines.push(`יתרה/החזר: ${snapshot.balance}`)
@@ -101,7 +111,7 @@ export const FloatingChat = forwardRef<FloatingChatHandle, FloatingChatProps>(fu
         }),
       })
       clearTimeout(timeoutId)
-      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer || 'לא קיבלתי תשובה. נסה שוב.' }])
     } catch (err) {
       const message = err instanceof DOMException && err.name === 'AbortError'
         ? 'העוזר לא הגיב בזמן. בדוק שהגדרות LLM תקינות בדף ההגדרות.'
