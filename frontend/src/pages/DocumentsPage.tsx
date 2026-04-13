@@ -97,6 +97,16 @@ const ID_SUPPLEMENT_FIELDS: Record<string, FieldMeta> = {
   address_zip: { label_he: 'מיקוד', field_1301: '—', type: 'string' },
 }
 
+const LIFE_INSURANCE_FIELDS: Record<string, FieldMeta> = {
+  insured_name: { label_he: 'שם המבוטח', field_1301: '—', type: 'string' },
+  insured_id: { label_he: 'ת.ז. מבוטח', field_1301: '—', type: 'string' },
+  tax_year: { label_he: 'שנת מס', field_1301: '—', type: 'number' },
+  insurance_company: { label_he: 'חברת ביטוח', field_1301: '—', type: 'string' },
+  total_deposits: { label_he: 'סה״כ הפקדות שנתיות', field_1301: '036/081', type: 'number' },
+  policy_type: { label_he: 'סוג פוליסה', field_1301: '—', type: 'string' },
+  has_savings_component: { label_he: 'מרכיב חיסכון', field_1301: '—', type: 'string' },
+}
+
 const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
   form_106: FORM_106_FIELDS,
   form_867: FORM_867_FIELDS,
@@ -105,6 +115,7 @@ const FIELD_MAPS: Record<string, Record<string, FieldMeta>> = {
   receipt: RECEIPT_FIELDS,
   rental_excel: RENTAL_EXCEL_FIELDS,
   id_supplement: ID_SUPPLEMENT_FIELDS,
+  life_insurance: LIFE_INSURANCE_FIELDS,
 }
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -115,6 +126,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   receipt: 'קבלה',
   rental_excel: 'חישוב שכירות (Excel)',
   id_supplement: 'ספח תעודת זהות',
+  life_insurance: 'ביטוח חיים',
 }
 
 function getFieldMap(docType: string): Record<string, FieldMeta> {
@@ -126,6 +138,7 @@ function getDocTitle(doc: DocumentInfo): string {
   const name = doc.extracted?.employer_name?.value
     || doc.extracted?.broker_name?.value
     || doc.extracted?.vendor_name?.value
+    || doc.extracted?.insured_name?.value
     || doc.extracted?.employee_name?.value
     || doc.extracted?.taxpayer_name?.value
     || doc.extracted?.holder_name?.value

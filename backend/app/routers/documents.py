@@ -19,14 +19,17 @@ from app.schemas.documents import (
 )
 from app.services.llm import (
     classify_document,
+    classify_document_vision,
     extract_form106_data,
     extract_form867_data,
     extract_rental_payment_data,
     extract_annual_summary_data,
     extract_receipt_data,
+    extract_receipt_data_vision,
+    extract_life_insurance_data,
     extract_id_supplement_data,
 )
-from app.services.pdf import EncryptedPdfError, extract_text_from_pdf
+from app.services.pdf import EncryptedPdfError, extract_text_from_pdf, render_pdf_page_to_image
 from app.services.excel import extract_rental_excel
 
 router = APIRouter(tags=["documents"])
@@ -42,6 +45,7 @@ EXTRACTORS = {
     "rental_payment": extract_rental_payment_data,
     "annual_summary": extract_annual_summary_data,
     "receipt": extract_receipt_data,
+    "life_insurance": extract_life_insurance_data,
 }
 
 
@@ -294,9 +298,23 @@ async def upload_documents(
                 ))
                 continue
 
-            # Step 1: Classify document type
-            classification = await classify_document(raw_text)
+            # Step 1: Classify document type (text-based, with filename hint)
+            classification = await classify_document(raw_text, filename)
             doc_type = classification.get("document_type", "unknown")
+
+            # Vision fallback: if text-based classification failed, render
+            # the first page as an image and classify visually
+            page_image = None
+            if doc_type not in EXTRACTORS:
+                try:
+                    page_image = render_pdf_page_to_image(str(file_path))
+                    vision_cls = await classify_document_vision(page_image, filename)
+                    vision_type = vision_cls.get("document_type", "unknown")
+                    if vision_type in EXTRACTORS:
+                        doc_type = vision_type
+                        classification = vision_cls
+                except Exception:
+                    pass
 
             if doc_type not in EXTRACTORS:
                 # Not a source document — skip gracefully
@@ -311,8 +329,13 @@ async def upload_documents(
                 continue
 
             # Step 2: Extract with type-specific extractor
-            extractor = EXTRACTORS[doc_type]
-            extracted_data = await extractor(raw_text)
+            # If vision was needed for classification, the text is garbled —
+            # use vision-based extraction for supported types
+            if page_image is not None and doc_type == "receipt":
+                extracted_data = await extract_receipt_data_vision(page_image)
+            else:
+                extractor = EXTRACTORS[doc_type]
+                extracted_data = await extractor(raw_text)
 
             # Validate against pydantic model
             model_cls = EXTRACTION_MODELS[doc_type]

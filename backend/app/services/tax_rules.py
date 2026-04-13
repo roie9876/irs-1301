@@ -33,6 +33,8 @@ class TaxYearRules:
     max_education_fund_deduction_employee_pct: float  # 2.5%
     # Pension credit (section 45a)
     pension_credit_income_ceiling: float  # Max annual insured income for 45a credit
+    # Credit qualifying income ceiling (section 45b — "הכנסה מזכה")
+    credit_qualifying_income_ceiling: float  # For combined pension+insurance credit path
     # Social insurance ceilings
     nii_max_insured_income: float  # Max monthly insured income for NII
     # Shift work credit
@@ -65,6 +67,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=130_488,
+        credit_qualifying_income_ceiling=106_800,
         nii_max_insured_income=45_075,
         shift_work_employer_income_ceiling=131_520,
         shift_work_max_credit=11_520,
@@ -93,6 +96,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=146_200,
+        credit_qualifying_income_ceiling=112_800,
         nii_max_insured_income=47_465,
         shift_work_employer_income_ceiling=138_480,
         shift_work_max_credit=12_120,
@@ -121,6 +125,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=150_696,
+        credit_qualifying_income_ceiling=116_400,
         nii_max_insured_income=49_030,
         shift_work_employer_income_ceiling=143_040,
         shift_work_max_credit=12_540,
@@ -149,6 +154,7 @@ TAX_RULES: dict[int, TaxYearRules] = {
         max_education_fund_deduction_employer_pct=0.075,
         max_education_fund_deduction_employee_pct=0.025,
         pension_credit_income_ceiling=150_696,
+        credit_qualifying_income_ceiling=116_400,
         nii_max_insured_income=49_030,  # Same as 2024
         shift_work_employer_income_ceiling=143_040,
         shift_work_max_credit=12_540,

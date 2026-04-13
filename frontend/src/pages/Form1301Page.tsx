@@ -1016,6 +1016,7 @@ export function Form1301Page() {
   }, [])
 
   const maritalStatus = personalForm.marital_status ?? ''
+  const taxpayerGender = personalForm.taxpayer_gender ?? ''
   const hasJointIncomeSource = generalForm['331'] === 'yes'
   const spouseAssistsIncome = generalForm['spouse_report_mode'] === 'yes' && generalForm['spouse_report_mode_detail'] === 'assisted_income'
   const taxpayerImmigrantStatus = generalForm['273'] ?? ''
@@ -1031,6 +1032,7 @@ export function Form1301Page() {
       if (maritalStatus) {
         params.set('marital_status', maritalStatus)
       }
+      if (taxpayerGender) params.set('taxpayer_gender', taxpayerGender)
       if (hasJointIncomeSource) params.set('has_joint_income_source', 'true')
       if (spouseAssistsIncome) params.set('spouse_assists_income', 'true')
       if (taxpayerImmigrantStatus) params.set('immigrant_taxpayer_status', taxpayerImmigrantStatus)
@@ -1064,13 +1066,23 @@ export function Form1301Page() {
         return updated
       })
       setAutoFilled(filled)
+      // Auto-fill personal form from detected document data (only if not already set by user)
+      if (eff) {
+        setPersonalForm((prev) => {
+          const updated = { ...prev }
+          if (!updated.taxpayer_gender && eff.detected_gender) {
+            updated.taxpayer_gender = String(eff.detected_gender)
+          }
+          return updated
+        })
+      }
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'שגיאה בחישוב')
     } finally {
       setLoading(false)
     }
-  }, [taxYear, inputs, maritalStatus, hasJointIncomeSource, spouseAssistsIncome, taxpayerImmigrantStatus, taxpayerImmigrantArrivalDate, spouseImmigrantStatus, spouseImmigrantArrivalDate])
+  }, [taxYear, inputs, maritalStatus, taxpayerGender, hasJointIncomeSource, spouseAssistsIncome, taxpayerImmigrantStatus, taxpayerImmigrantArrivalDate, spouseImmigrantStatus, spouseImmigrantArrivalDate])
 
   const yearDocs = documents.filter((d) => {
     const docYear = d.extracted?.tax_year?.value
@@ -1458,6 +1470,15 @@ export function Form1301Page() {
               <div className="self-center">שם משפחה</div>{renderPersonalInput('taxpayer_last_name')}
               <div className="self-center">שם פרטי</div>{renderPersonalInput('taxpayer_first_name')}
               <div className="self-center">תאריך לידה</div>{renderPersonalInput('taxpayer_birth_date', '', 'date')}
+              <div className="self-center">מין</div>
+              <div className="flex gap-3">
+                {([['male', 'זכר'], ['female', 'נקבה']] as const).map(([val, lbl]) => (
+                  <label key={val} className="flex items-center gap-1">
+                    <input type="radio" name="taxpayer_gender" checked={readPersonalValue('taxpayer_gender') === val} onChange={() => setPersonalForm((prev) => ({ ...prev, taxpayer_gender: val }))} />
+                    {lbl}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
           <div>
@@ -1915,6 +1936,13 @@ export function Form1301Page() {
                   )}>
                     {formatNIS(Math.abs(balance))}
                   </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {balance > 0
+                      ? 'שילמת פחות מס ממה שנדרש — עליך לשלם את ההפרש למס הכנסה'
+                      : balance < 0
+                        ? 'שילמת יותר מס ממה שנדרש — מגיע לך החזר ממס הכנסה'
+                        : 'אין הפרש — המס שנוכה תואם בדיוק את המס הנדרש'}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -1971,6 +1999,9 @@ export function Form1301Page() {
               <table className="w-full text-sm">
                 <tbody>
                   <ResultRow label="מס נטו (אחרי זיכויים)" value={r.calculation.net_tax} bold />
+                  {r.calculation.foreign_tax_credit > 0 && (
+                    <ResultRow label="  כולל זיכוי חו״ל" value={r.calculation.foreign_tax_credit} negative />
+                  )}
                   <ResultRow label="מס שנוכה ממשכורת (סעיף 84)" value={r.calculation.total_withheld} negative />
                   <ResultRow label="ניכוי ריבית/דיבידנד (סעיף 85)" value={r.withholdings.field_043} negative />
                   <ResultRow label="ניכוי מהכנסות אחרות (סעיף 87)" value={r.withholdings.field_040} negative />

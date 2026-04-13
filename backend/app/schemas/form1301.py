@@ -243,6 +243,7 @@ class TaxCalculation(BaseModel):
 
     # Net
     net_tax: float = 0
+    foreign_tax_credit: float = 0  # זיכוי חו"ל
     total_withheld: float = 0
     total_paid: float = 0
     balance: float = 0
@@ -267,7 +268,7 @@ class Form1301Result(BaseModel):
     source_documents: list[str] = []
     warnings: list[str] = []
     # Auto-populated values (field_name → effective value from documents)
-    effective_inputs: dict[str, float] = {}
+    effective_inputs: dict[str, float | str] = {}
 
 
 class Form1301PreviewResponse(BaseModel):

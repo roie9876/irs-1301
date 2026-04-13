@@ -222,6 +222,7 @@ export interface TaxCalculation {
   gross_tax_taxpayer: number
   gross_tax_spouse: number
   net_tax: number
+  foreign_tax_credit: number
   total_withheld: number
   total_paid: number
   balance: number
@@ -243,7 +244,7 @@ export interface Form1301Result {
   calculation: TaxCalculation
   source_documents: string[]
   warnings: string[]
-  effective_inputs: Record<string, number>
+  effective_inputs: Record<string, number | string>
 }
 
 export interface Form1301PreviewResponse {

@@ -11,10 +11,16 @@ class EncryptedPdfError(Exception):
 
 
 def _is_garbled(text: str) -> bool:
-    """Detect garbled text from PDFs with per-character positioning.
+    """Detect garbled text from PDFs with broken font encoding.
 
-    Heuristic: if most lines are 1-3 chars, the text is broken up per-character.
+    Heuristics:
+    1. Most characters are non-printable control chars (custom font encoding).
+    2. Most lines are 1-3 chars (per-character positioning).
     """
+    if len(text) > 20:
+        printable = sum(1 for ch in text if ch.isprintable() or ch in '\n\r\t')
+        if printable / len(text) < 0.5:
+            return True
     lines = [line for line in text.split("\n") if line.strip()]
     if len(lines) < 20:
         return False
@@ -54,8 +60,10 @@ def extract_text_from_pdf(file_path: str, password: str = "") -> str:
             pages.append(page.get_text("text"))
         text = "\n--- PAGE BREAK ---\n".join(pages)
 
-        # If text looks garbled (per-character positioning), try OCR
-        if _is_garbled(text):
+        # If text looks garbled (per-character positioning) or has
+        # almost no real content (scanned PDF), try OCR
+        content = text.replace("--- PAGE BREAK ---", "").strip()
+        if _is_garbled(text) or len(content) < 30:
             ocr_pages = []
             for i in range(len(doc)):
                 page = doc.load_page(i)
@@ -68,3 +76,14 @@ def extract_text_from_pdf(file_path: str, password: str = "") -> str:
     finally:
         if doc:
             doc.close()
+
+
+def render_pdf_page_to_image(file_path: str, page_num: int = 0) -> bytes:
+    """Render a PDF page as a PNG image in memory."""
+    doc = fitz.open(file_path)
+    try:
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap(dpi=200)
+        return pix.tobytes("png")
+    finally:
+        doc.close()

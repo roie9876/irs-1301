@@ -83,6 +83,16 @@ class ReceiptExtraction(BaseModel):
     payer_id: FieldValue = FieldValue()
 
 
+class LifeInsuranceExtraction(BaseModel):
+    insured_name: FieldValue = FieldValue()
+    insured_id: FieldValue = FieldValue()
+    tax_year: FieldValue = FieldValue()
+    insurance_company: FieldValue = FieldValue()
+    total_deposits: FieldValue = FieldValue()
+    policy_type: FieldValue = FieldValue()
+    has_savings_component: FieldValue = FieldValue()
+
+
 class RentalExcelExtraction(BaseModel):
     tax_year: FieldValue = FieldValue()
     properties: FieldValue = FieldValue()  # comma-separated property names
@@ -114,6 +124,7 @@ EXTRACTION_MODELS = {
     "rental_payment": RentalPaymentExtraction,
     "annual_summary": AnnualSummaryExtraction,
     "receipt": ReceiptExtraction,
+    "life_insurance": LifeInsuranceExtraction,
     "rental_excel": RentalExcelExtraction,
     "id_supplement": IdSupplementExtraction,
 }

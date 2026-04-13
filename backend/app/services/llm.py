@@ -57,18 +57,24 @@ FORM_106_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מט
 FORM_867_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מטופס 867 ישראלי (אישור ניכוי מס במקור — דיבידנד וריבית מניירות ערך).
 חלץ את השדות הבאים מהטקסט שלהלן והחזר JSON בלבד.
 
+חשוב מאוד:
+- טופס 867 יכול להיות "אישור ניכוי מס במקור מריבית מפקדונות ותוכניות חיסכון" (בנק) — במקרה כזה אין דיבידנד כלל.
+- בטופס בנק: מספר סניף הוא לא דיבידנד! אל תבלבל בין שדות טכניים (סניף, חשבון, פוליסה) לבין הכנסות.
+- שדה 5 (מס ששולם בחו"ל) ≠ שדה 6 (מס שנוכה במקור מדיבידנד). אלה שדות שונים! שורה 5 היא מס זר, שורה 6 היא ניכוי ישראלי.
+- אם הטופס מראה רק ריבית (שדה 078/076), אל תמציא ערכים לדיבידנד.
+
 השדות לחילוץ:
-- broker_name: שם הברוקר/חייב (טקסט)
+- broker_name: שם הברוקר/חייב/בנק (טקסט)
 - broker_id: מספר תיק ניכויים (טקסט)
 - account_name: שם החשבון (טקסט)
 - tax_year: שנת מס (מספר)
-- dividend_income: סה"כ הכנסה מדיבידנד לפני קיזוז הפסדים — שורה 1 (מספר)
+- dividend_income: סה"כ הכנסה מדיבידנד לפני קיזוז הפסדים — שורה 1 (מספר). null אם אין דיבידנד בטופס.
 - dividend_foreign: הכנסה מדיבידנד בחו"ל — שורה 2 (מספר)
 - dividend_tax_rate: שיעור ניכוי המס על דיבידנד (מספר, לדוגמה 25)
-- dividend_tax_withheld: מס שנוכה במקור מדיבידנד — שורה 6 (מספר)
+- dividend_tax_withheld: מס שנוכה במקור מדיבידנד — שורה 6 בלבד (מספר). זהו ניכוי ישראלי. אל תבלבל עם שורה 5 (מס זר).
 - foreign_tax_paid: מס ששולם בחו"ל — שורה 5 (מספר)
-- interest_income: הכנסה מריבית/דמי ניכיון — שורה 7 (מספר)
-- interest_tax_withheld: מס שנוכה במקור מריבית — שורה 11 (מספר)
+- interest_income: הכנסה מריבית/דמי ניכיון — שורה 7 או שדה 078/076 (מספר)
+- interest_tax_withheld: מס שנוכה במקור מריבית — שורה 11 או שדה 043 (מספר)
 
 כל שדה צריך להיות אובייקט עם:
 - value: הערך שחולץ (מספר או טקסט, null אם לא נמצא)
@@ -86,6 +92,7 @@ DOCUMENT_CLASSIFIER_PROMPT = """אתה מומחה לזיהוי סוגי טפסי
 - "rental_payment": אישור תשלום מס על הכנסות משכירות למגורים (10%)
 - "annual_summary": דוח שנתי על מכירת מניות/אופציות (Annual Sales Report)
 - "receipt": קבלה/חשבונית (למשל שכ"ט רו"ח)
+- "life_insurance": דוח שנתי מחברת ביטוח חיים — דוח שנתי מקוצר/מפורט למבוטח, כולל פירוט פוליסות ביטוח חיים, הפקדות שנתיות, ביטוח משכנתא, ביטוח אובדן כושר עבודה
 - "unknown": כל מסמך אחר — שומה, אישור הגשה, דוח רואה חשבון, טופס 1301, קבלה על דו"ח שנתי, וכדומה. זה כולל גם ניירת שהמטרה שלה היא בדיקה כנגד (reference) ולא מקור נתונים.
 
 החזר JSON בפורמט:
@@ -250,9 +257,11 @@ async def extract_form106_data(raw_text: str) -> dict:
     return await _llm_extract(FORM_106_EXTRACTION_PROMPT, raw_text)
 
 
-async def classify_document(raw_text: str) -> dict:
+async def classify_document(raw_text: str, filename: str = "") -> dict:
     """Classify a document by its type from extracted PDF text."""
     preview = raw_text[:500]
+    if filename:
+        preview = f"[שם הקובץ: {filename}]\n\n{preview}"
     return await _llm_extract(DOCUMENT_CLASSIFIER_PROMPT, preview, max_tokens=200)
 
 
@@ -274,6 +283,93 @@ async def extract_annual_summary_data(raw_text: str) -> dict:
 async def extract_receipt_data(raw_text: str) -> dict:
     """Extract receipt/invoice data (e.g., CPA fee)."""
     return await _llm_extract(RECEIPT_EXTRACTION_PROMPT, raw_text)
+
+
+LIFE_INSURANCE_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מדוחות שנתיים של חברות ביטוח חיים ישראליות.
+חלץ את השדות הבאים מהטקסט שלהלן והחזר JSON בלבד.
+
+השדות לחילוץ:
+- insured_name: שם המבוטח (טקסט)
+- insured_id: מספר זהות המבוטח (טקסט)
+- tax_year: שנת מס (מספר) — השנה שעליה הדוח
+- insurance_company: שם חברת הביטוח (טקסט)
+- total_deposits: סה"כ הפקדות/פרמיות ששולמו בשנה (מספר). חפש "סה''כ" ליד סכום הפקדות שנתיות
+- policy_type: סוג הפוליסה (טקסט) — ביטוח חיים, ביטוח משכנתא, אובדן כושר עבודה וכו'
+- has_savings_component: האם יש מרכיב חיסכון בפוליסה (בוליאני) — אם כתוב "ללא מרכיב חיסכון" הערך false
+
+כל שדה צריך להיות אובייקט עם:
+- value: הערך שחולץ (מספר או טקסט, null אם לא נמצא)
+- confidence: ציון ביטחון בין 0.0 ל-1.0
+
+טקסט המסמך:
+"""
+
+
+async def extract_life_insurance_data(raw_text: str) -> dict:
+    """Extract life insurance annual report data."""
+    return await _llm_extract(LIFE_INSURANCE_EXTRACTION_PROMPT, raw_text)
+
+
+async def _llm_vision_extract(prompt: str, image_bytes: bytes, mime_type: str = "image/png", max_tokens: int = 2000) -> dict:
+    """Generic LLM vision extraction — send prompt + image, return parsed JSON."""
+    import base64
+
+    load_dotenv(ENV_PATH, override=True)
+
+    provider = os.getenv("LLM_PROVIDER", "")
+    model = os.getenv("LLM_MODEL", "")
+    api_key = os.getenv("LLM_API_KEY", "")
+    api_base = os.getenv("AZURE_API_BASE", "")
+
+    if not all([provider, model, api_key]):
+        raise ValueError("LLM not configured")
+
+    prefix = PROVIDER_PREFIX.get(provider)
+    if prefix is None:
+        raise ValueError(f"ספק לא מוכר: {provider}")
+
+    llm_model = f"{prefix}{model}"
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+    kwargs: dict = {
+        "model": llm_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64_image}"},
+                    },
+                ],
+            }
+        ],
+        "api_key": api_key,
+        "response_format": {"type": "json_object"},
+        "max_tokens": max_tokens,
+    }
+    if provider == "azure" and api_base:
+        kwargs["api_base"] = api_base
+
+    response = await litellm.acompletion(**kwargs)
+    content = response.choices[0].message.content
+    return json.loads(content)
+
+
+async def classify_document_vision(image_bytes: bytes, filename: str = "") -> dict:
+    """Classify a document from its rendered page image when text extraction fails."""
+    prompt = DOCUMENT_CLASSIFIER_PROMPT
+    if filename:
+        prompt += f"שם הקובץ: {filename}\n\n"
+    prompt += "זהה את סוג המסמך מהתמונה:"
+    return await _llm_vision_extract(prompt, image_bytes, max_tokens=200)
+
+
+async def extract_receipt_data_vision(image_bytes: bytes) -> dict:
+    """Extract receipt/invoice data from a rendered PDF page image."""
+    prompt = RECEIPT_EXTRACTION_PROMPT + "חלץ את הנתונים מהתמונה:\n"
+    return await _llm_vision_extract(prompt, image_bytes)
 
 
 ID_SUPPLEMENT_EXTRACTION_PROMPT = """אתה מומחה לחילוץ נתונים מספח תעודת זהות ישראלית.

@@ -329,6 +329,86 @@ def aggregate_receipts(documents: list[DocumentInfo]) -> float:
     return total
 
 
+def _normalize_id(raw: str) -> str:
+    """Strip leading zeros and non-digit chars for ID comparison."""
+    return raw.lstrip("0").strip() if raw else ""
+
+
+def aggregate_life_insurance(
+    documents: list[DocumentInfo],
+    holder_name: str,
+    spouse_name: str,
+    holder_id: str = "",
+    spouse_id: str = "",
+    spouse_106_docs: list[DocumentInfo] | None = None,
+) -> tuple[float, float]:
+    """Sum life insurance deposits from annual insurance reports.
+
+    Matches insured_id/insured_name against holder/spouse to assign correctly.
+    Returns (taxpayer_total, spouse_total).
+    """
+    tp_total = 0.0
+    sp_total = 0.0
+    norm_holder_id = _normalize_id(holder_id)
+    norm_spouse_id = _normalize_id(spouse_id)
+
+    # Build spouse name hints from 106 filenames (e.g. "Michal_get-106.pdf" → "michal")
+    spouse_filename_hints: set[str] = set()
+    for sdoc in (spouse_106_docs or []):
+        fname = sdoc.original_filename.lower()
+        # Extract name-like tokens (>2 chars, not generic words)
+        for part in fname.replace("_", " ").replace("-", " ").replace(".", " ").split():
+            if len(part) > 2 and part not in {"get", "pdf", "106", "form", "doc", "spouse"}:
+                spouse_filename_hints.add(part)
+
+    for doc in documents:
+        if doc.document_type != "life_insurance":
+            continue
+        amount = _fv(doc.extracted.get("total_deposits", {}))
+        if amount <= 0:
+            continue
+
+        # Try ID-based matching first (most reliable)
+        insured_id_raw = str(doc.extracted.get("insured_id", {}).get("value", "") or "")
+        norm_insured_id = _normalize_id(insured_id_raw)
+        if norm_insured_id and len(norm_insured_id) >= 7:
+            if norm_spouse_id and norm_insured_id == norm_spouse_id:
+                sp_total += amount
+                continue
+            if norm_holder_id and norm_insured_id == norm_holder_id:
+                tp_total += amount
+                continue
+
+        # Try matching insured_name against spouse 106 filename hints
+        insured = str(doc.extracted.get("insured_name", {}).get("value", "") or "")
+        insured_lower = insured.lower()
+        if spouse_filename_hints:
+            # Transliterate common Hebrew first names to Latin for comparison
+            insured_parts_lower = set(insured_lower.split())
+            _HEBREW_TO_LATIN = {
+                "מיכל": "michal", "רועי": "roie", "רועה": "roie",
+                "דניאל": "daniel", "יוסי": "yossi", "יוסף": "yosef",
+                "שרה": "sara", "רחל": "rachel", "דוד": "david",
+                "משה": "moshe", "אברהם": "avraham", "יעקב": "yaakov",
+            }
+            latin_insured = {_HEBREW_TO_LATIN.get(p, "") for p in insured_parts_lower} - {""}
+            if latin_insured & spouse_filename_hints:
+                sp_total += amount
+                continue
+
+        # Fall back to name-based matching
+        insured_parts = set(insured.split())
+        holder_parts = set(holder_name.split()) if holder_name else set()
+        spouse_parts = set(spouse_name.split()) if spouse_name else set()
+        holder_match = len(insured_parts & holder_parts) if holder_parts else 0
+        spouse_match = len(insured_parts & spouse_parts) if spouse_parts else 0
+        if spouse_match > holder_match:
+            sp_total += amount
+        else:
+            tp_total += amount
+    return tp_total, sp_total
+
+
 def aggregate_rental_excel(documents: list[DocumentInfo]) -> tuple[float, float]:
     """Extract total rental income and tax from rental_excel documents.
 
@@ -373,6 +453,47 @@ def compute_pension_employee_credit(pension_employee: float, insured_income: flo
     return round(qualifying * 0.35)
 
 
+def _compute_pension_insurance_credits(
+    pension_employee: float,
+    life_insurance: float,
+    insured_income: float,
+    rules,
+    is_spouse: bool = False,
+) -> tuple[float, float]:
+    """Compare 45a-only vs 45b-combined paths and return (pension_credit, insurance_credit).
+
+    Path A (45a): pension-only credit using the higher pension_credit_income_ceiling.
+    Path B (45b/עמית מוטב): combined pension + insurance using the lower
+        credit_qualifying_income_ceiling (הכנסה מזכה).
+    For the spouse (section 45a(ה)), Path A also uses the lower ceiling.
+    Returns the better of the two.
+    """
+    # Path A: section 45a only — no insurance credit
+    # For the registered taxpayer, uses the higher pension_credit_income_ceiling.
+    # For the spouse (45a(ה)), uses the lower credit_qualifying_income_ceiling.
+    path_a_ceiling = rules.credit_qualifying_income_ceiling if is_spouse else rules.pension_credit_income_ceiling
+    pens_cap_a = rules.max_pension_deduction_pct * min(insured_income, path_a_ceiling)
+    pens_credit_a = round(min(pension_employee, pens_cap_a) * 0.35)
+    ins_credit_a = 0
+
+    if life_insurance <= 0:
+        return pens_credit_a, 0
+
+    # Path B: section 45b / עמית מוטב — lower ceiling, pension + insurance
+    qualifying_income_b = min(insured_income, rules.credit_qualifying_income_ceiling)
+    pens_cap_b = rules.max_pension_deduction_pct * qualifying_income_b  # 7%
+    ins_cap_b = 0.05 * qualifying_income_b  # 5%
+    pens_credit_b = round(min(pension_employee, pens_cap_b) * 0.35)
+    ins_credit_b = round(min(life_insurance, ins_cap_b) * 0.25)
+
+    total_a = pens_credit_a + ins_credit_a
+    total_b = pens_credit_b + ins_credit_b
+
+    if total_b >= total_a:
+        return pens_credit_b, ins_credit_b
+    return pens_credit_a, ins_credit_a
+
+
 def compute_children_credit_points(
     children_birth_years: list[int],
     tax_year: int,
@@ -407,13 +528,43 @@ def compute_children_credit_points(
     return points
 
 
+# Common Hebrew first names for gender validation heuristic
+_MALE_FIRST_NAMES = {
+    "רועי", "רואי", "דוד", "משה", "יוסף", "אברהם", "יצחק", "יעקב", "שמעון",
+    "דניאל", "אורי", "עמית", "גיל", "אלון", "עידו", "תומר", "אייל", "נדב",
+    "יונתן", "אסף", "ניר", "רון", "בועז", "שי", "אמיר", "אריאל", "מתן",
+    "עומר", "יובל", "אדם", "נועם", "איתי", "ליאב", "אלעד", "שלמה", "בנימין",
+}
+_FEMALE_FIRST_NAMES = {
+    "מיכל", "שרה", "רחל", "לאה", "רבקה", "חנה", "מרים", "דנה", "נועה",
+    "שירה", "תמר", "אורלי", "ענת", "גלית", "יעל", "עדי", "ליאת", "אורית",
+    "שלומית", "אביגיל", "הילה", "רוני", "טלי", "סיגל", "רונית", "אפרת",
+}
+
+
+def _infer_gender_from_name(full_name: str) -> str:
+    """Try to infer gender from a Hebrew first name. Returns 'male'/'female'/''."""
+    parts = full_name.strip().split()
+    if not parts:
+        return ""
+    # Try last part first (Hebrew IDs often have family name first)
+    for part in reversed(parts):
+        if part in _MALE_FIRST_NAMES:
+            return "male"
+        if part in _FEMALE_FIRST_NAMES:
+            return "female"
+    return ""
+
+
 def aggregate_id_supplement(documents: list[DocumentInfo]) -> dict:
     """Extract children info and gender from ID supplement documents."""
     result: dict = {
         "children_birth_years": [],
         "holder_gender": "",
         "holder_name": "",
+        "holder_id": "",
         "spouse_name": "",
+        "spouse_id": "",
     }
 
     for doc in documents:
@@ -428,13 +579,35 @@ def aggregate_id_supplement(documents: list[DocumentInfo]) -> dict:
                     result["children_birth_years"].append(by)
         gender_field = ext.get("holder_gender", {})
         if isinstance(gender_field, dict):
-            result["holder_gender"] = str(gender_field.get("value", "")).lower()
+            ocr_gender = str(gender_field.get("value", "")).lower()
+            result["holder_gender"] = ocr_gender
+
+            # Cross-check OCR gender against name heuristic (holder + filename)
+            name_val = ""
+            nf = ext.get("holder_name", {})
+            if isinstance(nf, dict):
+                name_val = str(nf.get("value", ""))
+            # Also check the filename for first-name hints
+            filename_hint = doc.original_filename if hasattr(doc, "original_filename") else ""
+            name_gender = _infer_gender_from_name(name_val) or _infer_gender_from_name(filename_hint)
+            if name_gender and name_gender != ocr_gender:
+                result["holder_gender"] = name_gender
+                result["_gender_override_reason"] = (
+                    f"OCR detected '{ocr_gender}' but name analysis "
+                    f"suggests '{name_gender}'"
+                )
         name_field = ext.get("holder_name", {})
         if isinstance(name_field, dict):
             result["holder_name"] = str(name_field.get("value", ""))
+        hid_field = ext.get("holder_id", {})
+        if isinstance(hid_field, dict):
+            result["holder_id"] = str(hid_field.get("value", "")).strip()
         sp_field = ext.get("spouse_name", {})
         if isinstance(sp_field, dict):
             result["spouse_name"] = str(sp_field.get("value", ""))
+        spid_field = ext.get("spouse_id", {})
+        if isinstance(spid_field, dict):
+            result["spouse_id"] = str(spid_field.get("value", "")).strip()
 
     return result
 
@@ -444,6 +617,7 @@ def compute_form1301(
     marital_status: str = "",
     has_joint_income_source: bool = False,
     spouse_assists_income: bool = False,
+    taxpayer_gender: str = "",
     immigrant_taxpayer_status: str = "",
     immigrant_taxpayer_arrival_date: str = "",
     immigrant_spouse_status: str = "",
@@ -587,6 +761,12 @@ def compute_form1301(
         if dividend_25_taxpayer == annual_summary["capital_income"]:
             dividend_25_taxpayer = 0
 
+    # Auto-populate production expenses from receipt documents (e.g., CPA fees)
+    if production_expenses_taxpayer == 0:
+        receipt_total = aggregate_receipts(all_docs)
+        if receipt_total > 0:
+            production_expenses_taxpayer = receipt_total
+
     # Auto-populate rental from xlsx
     if rental_10_taxpayer == 0:
         rental_from_excel, tax_from_excel = aggregate_rental_excel(all_docs)
@@ -614,6 +794,18 @@ def compute_form1301(
         life_insurance_taxpayer = tp["life_insurance"]
     if life_insurance_spouse == 0 and sp["life_insurance"] > 0:
         life_insurance_spouse = sp["life_insurance"]
+
+    # Auto-populate life insurance from dedicated insurance annual reports
+    if life_insurance_taxpayer == 0 or life_insurance_spouse == 0:
+        li_tp, li_sp = aggregate_life_insurance(
+            all_docs, id_supp["holder_name"], id_supp["spouse_name"],
+            holder_id=id_supp["holder_id"], spouse_id=id_supp["spouse_id"],
+            spouse_106_docs=spouse_docs,
+        )
+        if life_insurance_taxpayer == 0 and li_tp > 0:
+            life_insurance_taxpayer = li_tp
+        if life_insurance_spouse == 0 and li_sp > 0:
+            life_insurance_spouse = li_sp
 
     # Auto-populate capital gains (102) from 106 → capital gains (field 139)
     # This is "רווח הון מניירות ערך" from the 106, not a dividend
@@ -645,8 +837,11 @@ def compute_form1301(
             has_spouse_for_tax = False
 
     if id_supp["children_birth_years"] and children_credit_points_taxpayer == 0 and children_credit_points_spouse == 0:
-        # Determine who is the woman: if holder is male, spouse is the woman
-        holder_is_woman = id_supp["holder_gender"] == "female"
+        # Use explicit gender override if provided, else fall back to OCR
+        if taxpayer_gender:
+            holder_is_woman = taxpayer_gender == "female"
+        else:
+            holder_is_woman = id_supp["holder_gender"] == "female"
         children_credit_points_taxpayer = compute_children_credit_points(
             id_supp["children_birth_years"], year, is_woman=holder_is_woman,
         )
@@ -736,15 +931,25 @@ def compute_form1301(
         effective_inputs["children_credit_points_taxpayer"] = children_credit_points_taxpayer
     if children_credit_points_spouse > 0:
         effective_inputs["children_credit_points_spouse"] = children_credit_points_spouse
+    if production_expenses_taxpayer > 0:
+        effective_inputs["production_expenses_taxpayer"] = production_expenses_taxpayer
+    if production_expenses_spouse > 0:
+        effective_inputs["production_expenses_spouse"] = production_expenses_spouse
+
+    # Expose detected personal info from documents for frontend auto-fill
+    if id_supp["holder_gender"]:
+        effective_inputs["detected_gender"] = id_supp["holder_gender"]
+    if id_supp["holder_name"]:
+        effective_inputs["detected_holder_name"] = id_supp["holder_name"]
+    if id_supp["spouse_name"]:
+        effective_inputs["detected_spouse_name"] = id_supp["spouse_name"]
 
     taxpayer_salary = tp["gross_salary"]
     spouse_salary = sp["gross_salary"]
 
-    # Deduct production expenses (CPA fee) from salary
-    taxpayer_salary -= production_expenses_taxpayer
-    spouse_salary -= production_expenses_spouse
-
     # === Build all field structures ===
+    # field_158/172 show gross salary; production expenses are deducted
+    # separately in the progressive tax calculation below.
 
     income = IncomeFields(
         field_150=business_income_taxpayer,
@@ -836,7 +1041,10 @@ def compute_form1301(
     )
 
     # Credit points
-    taxpayer_is_woman = id_supp["holder_gender"] == "female"
+    if taxpayer_gender:
+        taxpayer_is_woman = taxpayer_gender == "female"
+    else:
+        taxpayer_is_woman = id_supp["holder_gender"] == "female"
     immigrant_credit_points_taxpayer = _monthly_immigrant_credit_points(
         immigrant_taxpayer_status,
         _parse_iso_date(immigrant_taxpayer_arrival_date),
@@ -918,7 +1126,12 @@ def compute_form1301(
     )
 
     # === Withholdings ===
-    dividend_interest_withheld = form867.get("dividend_tax_withheld", 0) + form867.get("interest_tax_withheld", 0)
+    # field_043 = Israeli-source withholding on dividends/interest only.
+    # Foreign tax (e.g. US withholding on ESOP dividends) is handled separately
+    # as foreign_tax_credit (field_048) — don't double-count it here.
+    foreign_tax_paid = form867.get("foreign_tax_paid", 0)
+    israeli_dividend_withheld = max(0, form867.get("dividend_tax_withheld", 0) - foreign_tax_paid)
+    dividend_interest_withheld = israeli_dividend_withheld + form867.get("interest_tax_withheld", 0)
     withholdings = WithholdingFields(
         field_042=tp["tax_withheld"] + sp["tax_withheld"],
         field_043=dividend_interest_withheld,
@@ -931,15 +1144,18 @@ def compute_form1301(
     # === Tax Calculation ===
 
     # Progressive tax on personal labor income (חלק ג + ד)
+    # Production expenses (CPA fee) reduce taxable income
     tp_progressive_income = (
-        taxpayer_salary + business_income_taxpayer
+        taxpayer_salary - production_expenses_taxpayer
+        + business_income_taxpayer
         + nii_self_employed_taxpayer + nii_employee_taxpayer
         + shift_work_taxpayer + retirement_grants_taxpayer
         + real_estate_income_taxpayer + other_income_taxpayer
         + other_income_joint
     )
     sp_progressive_income = (
-        spouse_salary + business_income_spouse
+        spouse_salary - production_expenses_spouse
+        + business_income_spouse
         + nii_self_employed_spouse + nii_employee_spouse
         + shift_work_spouse + retirement_grants_spouse
         + real_estate_income_spouse + other_income_spouse
@@ -1020,11 +1236,21 @@ def compute_form1301(
     cp_amount_tp = round(credit_points_taxpayer * rules.credit_point_value)
     cp_amount_sp = round(credit_points_spouse * rules.credit_point_value)
 
-    pension_emp_credit_tp = compute_pension_employee_credit(
-        pension_employee_credit_taxpayer, tp["insured_income"], rules
+    # Pension + life insurance credits — compare 45a-only vs 45b-combined paths
+    # Path A (45a): 35% × min(deposits, 7% × pension_credit_income_ceiling) — no insurance credit
+    # Path B (45b/עמית מוטב): 35% × min(deposits, 7% × credit_qualifying_income_ceiling)
+    #                        + 25% × min(insurance, 5% × credit_qualifying_income_ceiling)
+    # Pick the better of A and B per person.
+    # For spouse: section 45a(ה) — Path A also uses the lower ceiling.
+    pension_emp_credit_tp, life_ins_credit_tp = _compute_pension_insurance_credits(
+        pension_employee_credit_taxpayer,
+        life_insurance_taxpayer + survivors_insurance_taxpayer,
+        tp["insured_income"], rules,
     )
-    pension_emp_credit_sp = compute_pension_employee_credit(
-        pension_employee_credit_spouse, sp["insured_income"], rules
+    pension_emp_credit_sp, life_ins_credit_sp = _compute_pension_insurance_credits(
+        pension_employee_credit_spouse,
+        life_insurance_spouse + survivors_insurance_spouse,
+        sp["insured_income"], rules, is_spouse=True,
     )
 
     # Donation credit — split proportionally by donator
@@ -1033,10 +1259,6 @@ def compute_form1301(
     donation_credit_tp = round(donation_tp * 0.35)
     donation_credit_sp = round(donation_sp * 0.35)
     donation_credit = donation_credit_tp + donation_credit_sp
-
-    # Life insurance credit (25%) — per person
-    life_ins_credit_tp = round((life_insurance_taxpayer + survivors_insurance_taxpayer) * 0.25)
-    life_ins_credit_sp = round((life_insurance_spouse + survivors_insurance_spouse) * 0.25)
 
     # Section 76 credit — self-employed pension (35% of deposits)
     pension_self_credit_tp = round(pension_self_credit_taxpayer * 0.35)
@@ -1065,10 +1287,15 @@ def compute_form1301(
     gross_tax_sp = tax_regular_sp + surtax_sp
 
     # Net tax: credits capped per person (excess credits are lost)
-    net_tax = max(0, gross_tax_tp - total_credits_tp) + max(0, gross_tax_sp - total_credits_sp)
+    net_tax_before_foreign = max(0, gross_tax_tp - total_credits_tp) + max(0, gross_tax_sp - total_credits_sp)
+
+    # Foreign tax credit (זיכוי חו"ל) — tax paid abroad on foreign-source income
+    foreign_tax_credit = form867.get("foreign_tax_paid", 0)
+    net_tax = max(0, net_tax_before_foreign - foreign_tax_credit)
 
     total_paid = (
         tp["tax_withheld"] + sp["tax_withheld"]
+        + dividend_interest_withheld
         + rental_tax_paid
         + withholding_other
         + land_appreciation_tax
@@ -1104,7 +1331,8 @@ def compute_form1301(
         gross_tax_taxpayer=gross_tax_tp,
         gross_tax_spouse=gross_tax_sp,
         net_tax=net_tax,
-        total_withheld=tp["tax_withheld"] + sp["tax_withheld"],
+        foreign_tax_credit=foreign_tax_credit,
+        total_withheld=tp["tax_withheld"] + sp["tax_withheld"] + dividend_interest_withheld,
         total_paid=total_paid,
         balance=balance,
         interest_cpi_adjustment=interest_cpi_adjustment,
