@@ -9,6 +9,9 @@ user_documents/
 user_data/
 .planning/
 backend/documents/
+
+# ===== Large reference PDFs (keep locally, don't commit) =====
+IRS_Docs/*.pdf
 *.106.pdf
 *.106.jpg
 *.106.png
