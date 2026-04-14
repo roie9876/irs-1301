@@ -62,9 +62,10 @@ const GENERAL_INFO_SECTIONS: Array<{ title: string; rows: GeneralRow[] }> = [
       {
         code: 'aliyah_household_scope',
         label: 'בה"ח/י עולה',
-        explanation: 'זה קיצור לשאלה אם אחד מבני הזוג הוא עולה חדש או תושב חוזר הזכאי להקלות מס, והאם ההקלות מתייחסות להכנסות של משק הבית כולו או רק של אותו אדם.',
+        explanation: 'זה קיצור לשאלה אם אחד מבני הזוג הוא עולה חדש או תושב חוזר הזכאי להקלות מס, והאם ההקלות מתייחסות להכנסות של משק הבית כולו או רק של אותו אדם. אם אף אחד מבני הזוג אינו עולה חדש או תושב חוזר — בחרו "לא רלוונטי".',
         type: 'select',
         options: [
+          { value: '', label: 'לא רלוונטי — אף אחד מבני הזוג אינו עולה חדש/תושב חוזר' },
           { value: 'household', label: 'הכנסותי והכנסות בן/בת זוגי' },
           { value: 'self_only', label: 'הנני בלבד' },
           { value: 'separate_report', label: 'אני מגיש דוח גם אם לא חלות על הכנסותי הקלות מס' },
@@ -108,7 +109,7 @@ const GENERAL_INFO_SECTIONS: Array<{ title: string; rows: GeneralRow[] }> = [
       {
         code: '108',
         label: 'נאמנות',
-        explanation: 'השדה מיועד למצבים שבהם אתה יוצר, נהנה או מקבל חלוקות מנאמנות. אם אין לך קשר לנאמנות, השאר לא מסומן.',
+        explanation: 'סמן רק אם אתה יוצר, נהנה או מקבל חלוקות מנאמנות משפטית. לרוב האנשים אין קשר לנאמנות ואין צורך לסמן דבר — פשוט תשאיר הכל ריק.',
         type: 'checkbox-group',
         options: [
           { value: 'creator', label: 'יוצר/נהנה בנאמנות - הכנסות הנאמנות כלולות בדוח זה' },
@@ -1126,6 +1127,19 @@ export function Form1301Page() {
     return labels
   }, [])
 
+  // Build compact extraction summary for chat context
+  const documentExtractions = useMemo(() => {
+    return yearDocs.map((doc) => {
+      const ext = doc.extracted ?? {}
+      const fields = Object.entries(ext)
+        .filter(([, fv]) => fv?.value != null)
+        .map(([k, fv]) => `${k}=${fv.value}`)
+        .join(', ')
+      if (!fields) return null
+      return `${doc.original_filename} (${doc.document_type}): ${fields}`
+    }).filter(Boolean).join('\n')
+  }, [yearDocs])
+
   const chatSnapshot: FormSnapshot = {
     taxYear,
     activeTab,
@@ -1137,6 +1151,7 @@ export function Form1301Page() {
     balance,
     netTax: r?.calculation.net_tax ?? 0,
     fieldLabels,
+    documentExtractions,
   }
 
   const renderCell = (cell: CellDef) => {

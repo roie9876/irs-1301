@@ -34,6 +34,7 @@ export interface DocumentInfo {
   extracted: Record<string, FieldValue>
   user_corrected: boolean
   extraction_warnings?: string[]
+  upload_tax_year?: number | null
 }
 
 export interface UploadResult {
@@ -294,13 +295,16 @@ export async function api<T>(
   return response.json()
 }
 
-export async function uploadFiles(files: File[], passwords?: Record<string, string>): Promise<UploadResponse> {
+export async function uploadFiles(files: File[], passwords?: Record<string, string>, taxYear?: number): Promise<UploadResponse> {
   const formData = new FormData()
   for (const file of files) {
     formData.append('files', file)
   }
   if (passwords && Object.keys(passwords).length > 0) {
     formData.append('passwords', JSON.stringify(passwords))
+  }
+  if (taxYear != null) {
+    formData.append('tax_year', String(taxYear))
   }
 
   const response = await fetch('/api/documents/upload', {

@@ -20,6 +20,8 @@ export interface FormSnapshot {
   netTax: number
   /** code → Hebrew label, e.g. "150" → "הכנסה מעסק או משלח יד" */
   fieldLabels?: Record<string, string>
+  /** Compact summary of extracted data per document */
+  documentExtractions?: string
 }
 
 export interface FloatingChatHandle {
@@ -85,6 +87,7 @@ export const FloatingChat = forwardRef<FloatingChatHandle, FloatingChatProps>(fu
     if (snapshot.balance !== 0) lines.push(`יתרה/החזר: ${snapshot.balance}`)
     if (snapshot.netTax !== 0) lines.push(`מס נטו: ${snapshot.netTax}`)
     if (snapshot.sourceDocuments.length > 0) lines.push(`מסמכים: ${snapshot.sourceDocuments.join(', ')}`)
+    if (snapshot.documentExtractions) lines.push(`\nנתונים שחולצו מהמסמכים:\n${snapshot.documentExtractions}`)
     if (snapshot.warnings.length > 0) lines.push(`אזהרות: ${snapshot.warnings.join(', ')}`)
 
     return lines.join('\n')

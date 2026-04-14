@@ -187,8 +187,12 @@ def load_documents_for_year(year: int) -> list[DocumentInfo]:
             doc_type = data.get("document_type", "form_106")
             extracted = data["extracted"]
 
-            # Check year from extracted data
+            # Check year from extracted data, falling back to upload_tax_year
             doc_year = _fv(extracted.get("tax_year", {}))
+            if not doc_year:
+                upload_year = data.get("upload_tax_year")
+                if upload_year is not None:
+                    doc_year = upload_year
             if doc_type in _YEAR_AGNOSTIC_TYPES:
                 # Always load year-agnostic types (e.g. ID supplement)
                 pass
@@ -304,6 +308,9 @@ def aggregate_form867(documents: list[DocumentInfo]) -> dict[str, float]:
         "foreign_tax_paid": 0,
         "interest_income": 0,
         "interest_tax_withheld": 0,
+        "interest_15": 0,
+        "interest_20": 0,
+        "interest_25": 0,
     }
 
     for doc in documents:
@@ -315,6 +322,9 @@ def aggregate_form867(documents: list[DocumentInfo]) -> dict[str, float]:
         totals["foreign_tax_paid"] += _fv(ext.get("foreign_tax_paid", {}))
         totals["interest_income"] += _fv(ext.get("interest_income", {}))
         totals["interest_tax_withheld"] += _fv(ext.get("interest_tax_withheld", {}))
+        totals["interest_15"] += _fv(ext.get("interest_15", {}))
+        totals["interest_20"] += _fv(ext.get("interest_20", {}))
+        totals["interest_25"] += _fv(ext.get("interest_25", {}))
 
     return totals
 
@@ -832,7 +842,17 @@ def compute_form1301(
     # Only use 867 dividends/interest if no manual entry
     if dividend_25_taxpayer == 0 and form867["dividend_income"] > 0:
         dividend_25_taxpayer = form867["dividend_income"]
-    if interest_deposits_25_taxpayer == 0 and form867["interest_income"] > 0:
+    # Map 867 interest to correct rate fields
+    has_rate_breakdown = form867["interest_15"] > 0 or form867["interest_20"] > 0 or form867["interest_25"] > 0
+    if has_rate_breakdown:
+        if interest_deposits_15_taxpayer == 0 and form867["interest_15"] > 0:
+            interest_deposits_15_taxpayer = form867["interest_15"]
+        if interest_deposits_20_taxpayer == 0 and form867["interest_20"] > 0:
+            interest_deposits_20_taxpayer = form867["interest_20"]
+        if interest_deposits_25_taxpayer == 0 and form867["interest_25"] > 0:
+            interest_deposits_25_taxpayer = form867["interest_25"]
+    elif interest_deposits_25_taxpayer == 0 and form867["interest_income"] > 0:
+        # Fallback: no rate breakdown, put all interest in 25%
         interest_deposits_25_taxpayer = form867["interest_income"]
 
     # Auto-populate children credit points from ID supplement (ספח)
@@ -919,6 +939,10 @@ def compute_form1301(
         effective_inputs["dividend_25_spouse"] = dividend_25_spouse
     if interest_deposits_25_taxpayer > 0:
         effective_inputs["interest_deposits_25_taxpayer"] = interest_deposits_25_taxpayer
+    if interest_deposits_15_taxpayer > 0:
+        effective_inputs["interest_deposits_15_taxpayer"] = interest_deposits_15_taxpayer
+    if interest_deposits_20_taxpayer > 0:
+        effective_inputs["interest_deposits_20_taxpayer"] = interest_deposits_20_taxpayer
     if rental_10_taxpayer > 0:
         effective_inputs["rental_10_taxpayer"] = rental_10_taxpayer
     if rental_10_spouse > 0:

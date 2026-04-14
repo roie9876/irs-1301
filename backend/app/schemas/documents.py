@@ -47,6 +47,10 @@ class Form867Extraction(BaseModel):
     foreign_tax_paid: FieldValue = FieldValue()
     interest_income: FieldValue = FieldValue()
     interest_tax_withheld: FieldValue = FieldValue()
+    # Interest breakdown by tax rate (from bank 867 forms)
+    interest_15: FieldValue = FieldValue()
+    interest_20: FieldValue = FieldValue()
+    interest_25: FieldValue = FieldValue()
 
 
 class RentalPaymentExtraction(BaseModel):
@@ -137,6 +141,7 @@ class DocumentInfo(BaseModel):
     extracted: dict  # type-specific extraction data
     user_corrected: bool = False
     extraction_warnings: list[str] = []
+    upload_tax_year: int | None = None
 
 
 class UploadResult(BaseModel):

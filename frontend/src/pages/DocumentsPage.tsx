@@ -48,6 +48,9 @@ const FORM_867_FIELDS: Record<string, FieldMeta> = {
   foreign_tax_paid: { label_he: 'מס ששולם בחו"ל', field_1301: '—', type: 'number' },
   interest_income: { label_he: 'הכנסה מריבית', field_1301: '327', type: 'number' },
   interest_tax_withheld: { label_he: 'מס שנוכה מריבית', field_1301: '—', type: 'number' },
+  interest_15: { label_he: 'ריבית 15%', field_1301: '078', type: 'number' },
+  interest_20: { label_he: 'ריבית 20%', field_1301: '126', type: 'number' },
+  interest_25: { label_he: 'ריבית 25%', field_1301: '142', type: 'number' },
 }
 
 const RENTAL_PAYMENT_FIELDS: Record<string, FieldMeta> = {
@@ -196,8 +199,13 @@ export function DocumentsPage() {
 
   // Filter documents for the selected tax year
   const filteredDocuments = documents.filter((d) => {
+    // If the document was uploaded with a specific tax year, use that
+    if (d.upload_tax_year != null) {
+      return d.upload_tax_year === taxYear
+    }
+    // Legacy documents without upload_tax_year: use extracted tax_year
     const docYear = d.extracted?.tax_year?.value
-    return !docYear || Number(docYear) === taxYear
+    return docYear != null && Number(docYear) === taxYear
   })
 
   const lastFilesRef = useRef<File[]>([])
@@ -213,7 +221,7 @@ export function DocumentsPage() {
     setUploading(true)
     setErrors([])
     try {
-      const response = await uploadFiles(supportedFiles, filePasswords)
+      const response = await uploadFiles(supportedFiles, filePasswords, taxYear)
       const successes = response.results.filter((r) => r.status === 'success')
       const failures = response.results.filter((r) => r.status === 'error')
       const skipped = response.results.filter((r) => r.status === 'skipped')

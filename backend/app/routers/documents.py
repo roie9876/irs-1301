@@ -166,7 +166,9 @@ async def _reextract_document_sidecar(sidecar_path: Path) -> dict:
 async def upload_documents(
     files: list[UploadFile] = File(...),
     passwords: str = Form("{}"),
+    tax_year: str = Form(""),
 ):
+    upload_tax_year = int(tax_year) if tax_year.strip() else None
     DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
     results: list[UploadResult] = []
 
@@ -234,6 +236,8 @@ async def upload_documents(
                     "extracted": extraction_obj.model_dump(),
                     "user_corrected": False,
                 }
+                if upload_tax_year is not None:
+                    sidecar["upload_tax_year"] = upload_tax_year
                 sidecar_path.write_text(
                     json.dumps(sidecar, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -271,6 +275,8 @@ async def upload_documents(
                     "extracted": extraction_obj.model_dump(),
                     "user_corrected": False,
                 }
+                if upload_tax_year is not None:
+                    sidecar["upload_tax_year"] = upload_tax_year
                 if extraction_warnings:
                     sidecar["extraction_warnings"] = extraction_warnings
                 sidecar_path.write_text(
@@ -353,6 +359,8 @@ async def upload_documents(
                 "extracted": extraction_obj.model_dump(),
                 "user_corrected": False,
             }
+            if upload_tax_year is not None:
+                sidecar["upload_tax_year"] = upload_tax_year
             sidecar_path.write_text(
                 json.dumps(sidecar, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -397,6 +405,7 @@ async def list_documents():
                 extracted=data["extracted"],
                 user_corrected=data.get("user_corrected", False),
                 extraction_warnings=data.get("extraction_warnings", []),
+                upload_tax_year=data.get("upload_tax_year"),
             ))
         except (json.JSONDecodeError, KeyError):
             continue
