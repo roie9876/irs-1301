@@ -107,36 +107,16 @@ cd frontend && npm install && cd ..
 
 האפליקציה צריכה מפתח API של ספק AI (בינה מלאכותית) כדי לחלץ נתונים ממסמכים ולענות על שאלות.
 
-**הדרך הקלה:** דלג על השלב הזה. אחרי שתפעיל את האפליקציה, הכנס לדף **הגדרות** ומלא שם את הספק והמפתח.
+> **זה נעשה מתוך האפליקציה עצמה** — אחרי שתפעיל אותה (שלב 5), לך לדף **הגדרות** ➜ בחר ספק ➜ הדבק את המפתח ➜ לחץ שמור. זה הכל!
 
-**הדרך המתקדמת:** צור קובץ הגדרות:
+**איפה משיגים מפתח?**
 
-#### 🍎 Mac
-```bash
-cp backend/.env.example backend/.env
-```
-
-#### 🪟 Windows
-```powershell
-copy backend\.env.example backend\.env
-```
-
-פתח את הקובץ `backend/.env` בעורך טקסט כלשהו ומלא:
-
-```env
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o
-LLM_API_KEY=sk-...כאן-המפתח-שלך...
-```
-
-**ספקים נתמכים:**
-
-| ספק | מה לכתוב ב-`LLM_PROVIDER` | דוגמה ל-`LLM_MODEL` | איפה משיגים מפתח |
-|-----|---------------------------|---------------------|------------------|
-| OpenAI | `openai` | `gpt-4o` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| Google Gemini | `gemini` | `gemini-2.0-flash` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| Anthropic Claude | `anthropic` | `claude-sonnet-4-20250514` | [console.anthropic.com](https://console.anthropic.com/) |
-| Azure OpenAI | `azure` | `gpt-4o` | דרך פורטל Azure |
+| ספק | איפה להירשם ולקבל מפתח |
+|-----|------------------------|
+| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Google Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Anthropic Claude | [console.anthropic.com](https://console.anthropic.com/) |
+| Azure OpenAI | דרך פורטל Azure |
 
 ---
 
