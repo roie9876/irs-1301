@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, ApiError } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Plus, Calendar } from 'lucide-react'
 
 const PROVIDERS = [
   {
@@ -102,6 +102,13 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [isConfigured, setIsConfigured] = useState(false)
 
+  // Tax year management
+  const [supportedYears, setSupportedYears] = useState<number[]>([])
+  const [newYear, setNewYear] = useState('')
+  const [creatingYear, setCreatingYear] = useState(false)
+  const [yearMessage, setYearMessage] = useState('')
+  const [yearStatus, setYearStatus] = useState<'idle' | 'success' | 'error'>('idle')
+
   useEffect(() => {
     api<SettingsResponse>('/settings')
       .then((s) => {
@@ -114,6 +121,44 @@ export function SettingsPage() {
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    api<{ years: number[] }>('/settings/supported-years')
+      .then((r) => setSupportedYears(r.years))
+      .catch(() => {})
+  }, [])
+
+  async function handleCreateYear() {
+    const year = parseInt(newYear, 10)
+    if (!year || year < 2020 || year > 2100) {
+      setYearStatus('error')
+      setYearMessage('שנה לא תקינה')
+      return
+    }
+    if (supportedYears.includes(year)) {
+      setYearStatus('error')
+      setYearMessage(`שנת ${year} כבר קיימת`)
+      return
+    }
+    setCreatingYear(true)
+    setYearMessage('')
+    setYearStatus('idle')
+    try {
+      const result = await api<{ years: number[] }>('/settings/create-tax-year', {
+        method: 'POST',
+        body: JSON.stringify({ year }),
+      })
+      setSupportedYears(result.years)
+      setNewYear('')
+      setYearStatus('success')
+      setYearMessage(`שנת ${year} נוצרה בהצלחה ✓`)
+    } catch (err) {
+      setYearStatus('error')
+      setYearMessage(err instanceof ApiError ? err.message : 'שגיאה ביצירת שנה')
+    } finally {
+      setCreatingYear(false)
+    }
+  }
 
   const currentProvider = PROVIDERS.find((p) => p.id === selectedProvider)
 
@@ -292,6 +337,79 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Tax year management */}
+      <div className="pt-4">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Calendar className="h-5 w-5" />
+          ניהול שנות מס
+        </h2>
+        <p className="text-muted-foreground mt-1">צור שנת מס חדשה — כללי המס יועתקו מהשנה האחרונה</p>
+      </div>
+
+      <Card>
+        <CardContent className="space-y-4 p-6">
+          {/* Existing years */}
+          {supportedYears.length > 0 && (
+            <div className="space-y-2">
+              <Label>שנים פעילות</Label>
+              <div className="flex flex-wrap gap-2">
+                {supportedYears.map((y) => (
+                  <span
+                    key={y}
+                    className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-sm font-medium"
+                  >
+                    {y}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Create new year */}
+          <div className="space-y-2">
+            <Label htmlFor="newYear">שנה חדשה</Label>
+            <div className="flex items-center gap-3">
+              <Input
+                id="newYear"
+                type="number"
+                value={newYear}
+                onChange={(e) => {
+                  setNewYear(e.target.value)
+                  setYearStatus('idle')
+                  setYearMessage('')
+                }}
+                placeholder="למשל 2026"
+                className="w-32"
+                dir="ltr"
+              />
+              <Button
+                onClick={handleCreateYear}
+                disabled={creatingYear || !newYear}
+              >
+                {creatingYear ? (
+                  <Loader2 className="h-4 w-4 animate-spin me-2" />
+                ) : (
+                  <Plus className="h-4 w-4 me-2" />
+                )}
+                צור שנה
+              </Button>
+            </div>
+          </div>
+
+          {/* Status message */}
+          {yearMessage && (
+            <p
+              className={cn(
+                'text-sm font-medium',
+                yearStatus === 'success' ? 'text-green-600' : 'text-red-600'
+              )}
+            >
+              {yearStatus === 'success' ? '✓' : '✗'} {yearMessage}
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

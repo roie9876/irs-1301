@@ -1,6 +1,8 @@
 """Year-specific Israeli tax parameters for Form 1301 calculation."""
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -42,124 +44,59 @@ class TaxYearRules:
     shift_work_max_credit: float
 
 
-TAX_RULES: dict[int, TaxYearRules] = {
-    2022: TaxYearRules(
-        year=2022,
-        credit_point_value=2_676,
-        surtax_threshold=663_240,
-        surtax_rate=0.03,
-        surtax_capital_rate=0.0,
-        brackets=[
-            TaxBracket(upper_limit=77_400, rate_personal=0.10, rate_other=0.31),
-            TaxBracket(upper_limit=110_880, rate_personal=0.14, rate_other=0.31),
-            TaxBracket(upper_limit=178_080, rate_personal=0.20, rate_other=0.31),
-            TaxBracket(upper_limit=247_440, rate_personal=0.31, rate_other=0.31),
-            TaxBracket(upper_limit=514_920, rate_personal=0.35, rate_other=0.35),
-            TaxBracket(upper_limit=float("inf"), rate_personal=0.47, rate_other=0.47),
-        ],
-        rental_flat_rate=0.10,
-        rental_exemption_ceiling=5_196,
-        dividend_rate=0.25,
-        interest_rate=0.25,
-        resident_credit_points=2.25,
-        woman_credit_points=0.5,
-        max_pension_deduction_pct=0.07,
-        max_education_fund_deduction_employer_pct=0.075,
-        max_education_fund_deduction_employee_pct=0.025,
-        pension_credit_income_ceiling=130_488,
-        credit_qualifying_income_ceiling=106_800,
-        nii_max_insured_income=45_075,
-        shift_work_employer_income_ceiling=131_520,
-        shift_work_max_credit=11_520,
-    ),
-    2023: TaxYearRules(
-        year=2023,
-        credit_point_value=2_820,
-        surtax_threshold=698_280,
-        surtax_rate=0.03,
-        surtax_capital_rate=0.0,
-        brackets=[
-            TaxBracket(upper_limit=81_480, rate_personal=0.10, rate_other=0.31),
-            TaxBracket(upper_limit=116_760, rate_personal=0.14, rate_other=0.31),
-            TaxBracket(upper_limit=187_440, rate_personal=0.20, rate_other=0.31),
-            TaxBracket(upper_limit=260_520, rate_personal=0.31, rate_other=0.31),
-            TaxBracket(upper_limit=542_160, rate_personal=0.35, rate_other=0.35),
-            TaxBracket(upper_limit=float("inf"), rate_personal=0.47, rate_other=0.47),
-        ],
-        rental_flat_rate=0.10,
-        rental_exemption_ceiling=5_471,
-        dividend_rate=0.25,
-        interest_rate=0.25,
-        resident_credit_points=2.25,
-        woman_credit_points=0.5,
-        max_pension_deduction_pct=0.07,
-        max_education_fund_deduction_employer_pct=0.075,
-        max_education_fund_deduction_employee_pct=0.025,
-        pension_credit_income_ceiling=146_200,
-        credit_qualifying_income_ceiling=112_800,
-        nii_max_insured_income=47_465,
-        shift_work_employer_income_ceiling=138_480,
-        shift_work_max_credit=12_120,
-    ),
-    2024: TaxYearRules(
-        year=2024,
-        credit_point_value=2_904,
-        surtax_threshold=721_560,
-        surtax_rate=0.03,
-        surtax_capital_rate=0.0,
-        brackets=[
-            TaxBracket(upper_limit=84_120, rate_personal=0.10, rate_other=0.31),
-            TaxBracket(upper_limit=120_720, rate_personal=0.14, rate_other=0.31),
-            TaxBracket(upper_limit=193_800, rate_personal=0.20, rate_other=0.31),
-            TaxBracket(upper_limit=269_280, rate_personal=0.31, rate_other=0.31),
-            TaxBracket(upper_limit=560_280, rate_personal=0.35, rate_other=0.35),
-            TaxBracket(upper_limit=float("inf"), rate_personal=0.47, rate_other=0.47),
-        ],
-        rental_flat_rate=0.10,
-        rental_exemption_ceiling=5_654,
-        dividend_rate=0.25,
-        interest_rate=0.25,
-        resident_credit_points=2.25,
-        woman_credit_points=0.5,
-        max_pension_deduction_pct=0.07,
-        max_education_fund_deduction_employer_pct=0.075,
-        max_education_fund_deduction_employee_pct=0.025,
-        pension_credit_income_ceiling=150_696,
-        credit_qualifying_income_ceiling=116_400,
-        nii_max_insured_income=49_030,
-        shift_work_employer_income_ceiling=143_040,
-        shift_work_max_credit=12_540,
-    ),
-    2025: TaxYearRules(
-        year=2025,
-        credit_point_value=2_904,  # Frozen at 2024 level
-        surtax_threshold=721_560,  # Frozen at 2024 level
-        surtax_rate=0.03,
-        surtax_capital_rate=0.02,  # NEW: 2% extra on capital income above threshold
-        brackets=[
-            TaxBracket(upper_limit=84_120, rate_personal=0.10, rate_other=0.31),
-            TaxBracket(upper_limit=120_720, rate_personal=0.14, rate_other=0.31),
-            TaxBracket(upper_limit=193_800, rate_personal=0.20, rate_other=0.31),
-            TaxBracket(upper_limit=269_280, rate_personal=0.31, rate_other=0.31),
-            TaxBracket(upper_limit=560_280, rate_personal=0.35, rate_other=0.35),
-            TaxBracket(upper_limit=float("inf"), rate_personal=0.47, rate_other=0.47),
-        ],
-        rental_flat_rate=0.10,
-        rental_exemption_ceiling=5_654,  # Frozen at 2024 level
-        dividend_rate=0.25,
-        interest_rate=0.25,
-        resident_credit_points=2.25,
-        woman_credit_points=0.5,
-        max_pension_deduction_pct=0.07,
-        max_education_fund_deduction_employer_pct=0.075,
-        max_education_fund_deduction_employee_pct=0.025,
-        pension_credit_income_ceiling=150_696,
-        credit_qualifying_income_ceiling=116_400,
-        nii_max_insured_income=49_030,  # Same as 2024
-        shift_work_employer_income_ceiling=143_040,
-        shift_work_max_credit=12_540,
-    ),
-}
+TAX_RULES_JSON = Path(__file__).resolve().parent.parent.parent / "tax_rules.json"
+
+
+def _load_rules_from_json(path: Path) -> dict[int, TaxYearRules]:
+    """Load tax rules from a JSON config file."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    rules: dict[int, TaxYearRules] = {}
+    for year_str, cfg in data.items():
+        if year_str.startswith("_"):
+            continue  # skip comments
+        year = int(year_str)
+        brackets = [
+            TaxBracket(
+                upper_limit=float(b["upper_limit"]),
+                rate_personal=b["rate_personal"],
+                rate_other=b["rate_other"],
+            )
+            for b in cfg["brackets"]
+        ]
+        rules[year] = TaxYearRules(
+            year=year,
+            credit_point_value=cfg["credit_point_value"],
+            surtax_threshold=cfg["surtax_threshold"],
+            surtax_rate=cfg["surtax_rate"],
+            surtax_capital_rate=cfg.get("surtax_capital_rate", 0.0),
+            brackets=brackets,
+            rental_flat_rate=cfg["rental_flat_rate"],
+            rental_exemption_ceiling=cfg["rental_exemption_ceiling"],
+            dividend_rate=cfg["dividend_rate"],
+            interest_rate=cfg["interest_rate"],
+            resident_credit_points=cfg["resident_credit_points"],
+            woman_credit_points=cfg["woman_credit_points"],
+            max_pension_deduction_pct=cfg["max_pension_deduction_pct"],
+            max_education_fund_deduction_employer_pct=cfg["max_education_fund_deduction_employer_pct"],
+            max_education_fund_deduction_employee_pct=cfg["max_education_fund_deduction_employee_pct"],
+            pension_credit_income_ceiling=cfg["pension_credit_income_ceiling"],
+            credit_qualifying_income_ceiling=cfg["credit_qualifying_income_ceiling"],
+            nii_max_insured_income=cfg["nii_max_insured_income"],
+            shift_work_employer_income_ceiling=cfg["shift_work_employer_income_ceiling"],
+            shift_work_max_credit=cfg["shift_work_max_credit"],
+        )
+    return rules
+
+
+# Load from JSON config file
+TAX_RULES: dict[int, TaxYearRules] = _load_rules_from_json(TAX_RULES_JSON)
+
+
+def reload_rules() -> None:
+    """Reload tax rules from disk (call after editing tax_rules.json)."""
+    global TAX_RULES
+    TAX_RULES.clear()
+    TAX_RULES.update(_load_rules_from_json(TAX_RULES_JSON))
 
 
 def get_rules(year: int) -> TaxYearRules:

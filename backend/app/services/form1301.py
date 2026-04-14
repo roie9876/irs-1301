@@ -178,6 +178,9 @@ def load_documents_for_year(year: int) -> list[DocumentInfo]:
     paths = list(DOCUMENTS_DIR.glob(f"*{SIDECAR_SUFFIX}"))
     paths += [p for p in DOCUMENTS_DIR.glob("*.106.json") if not p.name.endswith(SIDECAR_SUFFIX)]
 
+    # Year-agnostic document types — loaded regardless of tax_year
+    _YEAR_AGNOSTIC_TYPES = {"id_supplement"}
+
     for sidecar_path in sorted(set(paths)):
         try:
             data = json.loads(sidecar_path.read_text(encoding="utf-8"))
@@ -186,7 +189,14 @@ def load_documents_for_year(year: int) -> list[DocumentInfo]:
 
             # Check year from extracted data
             doc_year = _fv(extracted.get("tax_year", {}))
-            if doc_year and int(doc_year) != year:
+            if doc_type in _YEAR_AGNOSTIC_TYPES:
+                # Always load year-agnostic types (e.g. ID supplement)
+                pass
+            elif doc_year and int(doc_year) != year:
+                # Has a year but doesn't match — skip
+                continue
+            elif not doc_year:
+                # No year and not year-agnostic — skip
                 continue
 
             documents.append(DocumentInfo(

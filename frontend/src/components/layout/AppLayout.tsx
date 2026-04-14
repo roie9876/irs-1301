@@ -1,8 +1,11 @@
 import { Settings, FileText, Calendar, Calculator } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useTaxYear } from '@/lib/tax-year-context'
+import { api } from '@/lib/api'
 
-const TAX_YEARS = [2025, 2024, 2023, 2022, 2021, 2020]
+// Fallback if backend is unreachable
+const DEFAULT_YEARS = [2025, 2024, 2023, 2022]
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -11,6 +14,13 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation()
   const { taxYear, setTaxYear } = useTaxYear()
+  const [supportedYears, setSupportedYears] = useState(DEFAULT_YEARS)
+
+  useEffect(() => {
+    api<{ years: number[] }>('/settings/supported-years')
+      .then((data) => setSupportedYears(data.years))
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -27,7 +37,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 onChange={(e) => setTaxYear(Number(e.target.value))}
                 className="bg-transparent text-sm font-medium outline-none cursor-pointer"
               >
-                {TAX_YEARS.map((y) => (
+                {supportedYears.map((y) => (
                   <option key={y} value={y}>
                     שנת מס {y}
                   </option>
