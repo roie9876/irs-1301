@@ -38,9 +38,9 @@ def test_compute_form1301_with_manual_inputs():
         rental_tax_paid=10_000,
         dividend_25_taxpayer=40_000,
     )
-    # 10% of 100,000 = 15,220
+    # 10% of 100,000 = 10,000
     assert result.calculation.tax_rental_10pct == 10_000
-    # 25% of 40,000 = 18,374.5 → 18,375
+    # 25% of 40,000 = 10,000
     assert abs(result.calculation.tax_25pct - 10_000) <= 1
     # Withholdings should include rental tax paid
     assert result.withholdings.field_220 == 10_000

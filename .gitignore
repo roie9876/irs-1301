@@ -1,6 +1,7 @@
 # ===== PERSONAL DOCUMENTS - NEVER COMMIT =====
 # All user-uploaded personal tax documents
 *_private/
+*_private.py
 private_documents/
 data/uploads/
 data/personal/
