@@ -77,29 +77,27 @@ cd irs-1301
 
 ---
 
-### שלב 3: הכנת סביבת העבודה
+### שלב 3: התקנה
 
 #### 🍎 Mac
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-make install
+./install.sh
 ```
 
 #### 🪟 Windows
 
+לחץ פעמיים על **`install.bat`** (או הרץ ב-PowerShell):
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-cd frontend && npm install && cd ..
-.venv\Scripts\pip install -r backend\requirements.txt
+.\install.bat
 ```
 
 > אם PowerShell מסרב להריץ סקריפטים, הריצ' קודם:
 > ```powershell
 > Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 > ```
+
+הסקריפט יוצר סביבה וירטואלית ומתקין את כל החבילות באופן אוטומטי.
 
 ---
 
@@ -125,26 +123,15 @@ cd frontend && npm install && cd ..
 #### 🍎 Mac
 
 ```bash
-make run
+./start.sh
 ```
 
 #### 🪟 Windows
 
-פתח **שני חלונות** של PowerShell:
+לחץ פעמיים על **`start.bat`**
 
-**חלון 1 — Backend:**
-```powershell
-cd irs-1301
-.venv\Scripts\Activate.ps1
-cd backend
-..\.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
-```
-
-**חלון 2 — Frontend:**
-```powershell
-cd irs-1301\frontend
-npm run dev
-```
+זהו! הסקריפט מפעיל את השרת ואת הממשק יחד, ופותח את הדפדפן אוטומטית.
+לסגירה: לחץ על מקש כלשהו בחלון.
 
 ---
 
@@ -173,12 +160,11 @@ npm run dev
 #### 🍎 Mac
 ```bash
 cd irs-1301
-source .venv/bin/activate
-make run
+./start.sh
 ```
 
 #### 🪟 Windows
-מריצים את שני חלונות ה-PowerShell כמו בשלב 5 למעלה.
+לחץ פעמיים על **`start.bat`** בתיקיית הפרויקט.
 
 ---
 
@@ -188,9 +174,9 @@ make run
 |------|-------|
 | `command not found: python3` | Python לא הותקן, או לא נוסף ל-PATH. התקן מחדש וסמן "Add to PATH". |
 | `command not found: node` / `npm` | Node.js לא הותקן. הורד מ-[nodejs.org](https://nodejs.org/). |
-| `command not found: make` (Windows) | רגיל ב-Windows. עקוב אחרי הוראות Windows שלמעלה (בלי `make`). |
 | האפליקציה עולה אבל לא מחלצת מסמכים | ודא שמילאת מפתח API בדף ההגדרות או בקובץ `.env`. |
-| `ModuleNotFoundError` | הסביבה הווירטואלית לא פעילה. הרץ `source .venv/bin/activate` (Mac) או `.venv\Scripts\Activate.ps1` (Windows). |
+| `ModuleNotFoundError` | חבילות חסרות. הרץ `./install.sh` (Mac) או לחץ פעמיים על `install.bat` (Windows). |
+| `ECONNREFUSED` / `Bad Gateway` | השרת לא רץ. הפעל מחדש עם `./start.sh` או `start.bat`. |
 | `EACCES: permission denied` (Mac) | הרץ עם `sudo` או תקן הרשאות npm: `sudo chown -R $USER /usr/local/lib/node_modules` |
 
 ---
